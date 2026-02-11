@@ -138,7 +138,7 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
                 left: 0,
                 width: '100%',
                 height: '100%',
-                pointerEvents: 'none',
+                pointerEvents: 'none', // 容器不接收事件
                 zIndex: 5,
             }}
         >
@@ -161,7 +161,7 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
                             fontFamily: group.fontFamily || 'Arial, sans-serif',
                             lineHeight: 1.2, // Match PDF line height approx
                             cursor: 'text',
-                            pointerEvents: 'auto',
+                            pointerEvents: (activeTool === 'text' || activeTool === 'select') ? 'auto' : 'none',
                             whiteSpace: 'pre-wrap', // Preserve spaces
                             zIndex: isEditing ? 100 : 1,
                         }}

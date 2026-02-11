@@ -167,13 +167,12 @@ export class PDFRenderer {
     async renderThumbnail(
         pageNumber: number,
         canvas: HTMLCanvasElement,
-        maxWidth: number = 150
+        maxWidth: number = 150,
+        rotation: number = 0
     ): Promise<void> {
-        // Thumbnails typically use unique canvases, but we can add safety if needed.
-        // For now, since Sidebar creates new canvas elements, it's safe.
         try {
             const page = await this.getPage(pageNumber);
-            const viewport = page.getViewport({ scale: 1.0 });
+            const viewport = page.getViewport({ scale: 1.0, rotation });
 
             // 計算縮圖比例
             const scale = maxWidth / viewport.width;
@@ -217,7 +216,41 @@ export class PDFRenderer {
     }
 
     /**
-     * 取得頁面文字內容
+     * 取得頁面文字內容並轉換為 NativeTextItem 陣列
+     */
+    async getPageTextContent(pageNumber: number): Promise<any[]> {
+        try {
+            const page = await this.getPage(pageNumber);
+            // 關鍵修正：永遠使用 rotation 0 取得原始座標
+            const viewport = page.getViewport({ scale: 1.0, rotation: 0 });
+            const textContent = await page.getTextContent();
+
+            return textContent.items.map((item: any, index: number) => {
+                const [a, b, , , e, f] = item.transform;
+                const fontSize = Math.sqrt(a * a + b * b);
+                const height = (item.height && item.height > 0) ? item.height : fontSize;
+
+                return {
+                    id: `native-${index}`,
+                    text: item.str,
+                    width: item.width,
+                    height: height,
+                    x: e,
+                    // 使用 ViewBox 計算相對於左上角的 Y 座標 (PDF 為左下角)
+                    y: viewport.viewBox[3] - f - height,
+                    fontSize: fontSize,
+                    fontFamily: item.fontName,
+                    transform: item.transform
+                };
+            });
+        } catch (error) {
+            console.error('取得文字內容失敗:', error);
+            throw new Error('無法取得 PDF 文字內容');
+        }
+    }
+
+    /**
+     * 取得頁面原始文字內容物件 (PDF.js 原生格式)
      */
     async getTextContent(pageNumber: number) {
         try {

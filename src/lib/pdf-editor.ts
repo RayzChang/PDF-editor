@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
 import type { Annotation, PageInfo } from '../store/editor-store';
 
 export interface TextModification {
@@ -19,7 +19,8 @@ export interface TextModification {
 export async function modifyPageText(
     pdfBytes: Uint8Array | ArrayBuffer,
     pageIndex: number,
-    modifications: TextModification[]
+    modifications: TextModification[],
+    rotation: number = 0
 ): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.load(pdfBytes);
     const pages = pdfDoc.getPages();
@@ -27,6 +28,10 @@ export async function modifyPageText(
         throw new Error(`Page index ${pageIndex} out of bounds`);
     }
     const page = pages[pageIndex];
+
+    // 關鍵修正：套用頁面旋轉
+    page.setRotation(degrees(rotation));
+
     const { height: pageHeight } = page.getSize();
 
     const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -223,12 +228,20 @@ export class PDFEditor {
             }
         }
 
+        // 確保每一頁都套用正確的旋轉角度 (針對 Annotation 套用)
+        for (const info of pagesInfo) {
+            if (info.type === 'original' && info.originalIndex !== undefined) {
+                const p = pages[info.originalIndex - 1];
+                if (p) p.setRotation(degrees(info.rotation || 0));
+            }
+        }
+
         return pdfDoc;
     }
 
     static async downloadPDF(pdfDoc: PDFDocument, fileName: string) {
         const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = fileName;

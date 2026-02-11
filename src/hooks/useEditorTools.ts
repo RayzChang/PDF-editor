@@ -5,6 +5,9 @@ import type { Annotation } from '../store/editor-store';
 export const useEditorTools = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
     pdfCanvasRef: React.RefObject<HTMLCanvasElement | null>,
+    interactionLayerRef: React.RefObject<HTMLDivElement | null>,
+    rotation: number,
+    setCursorPosition: (pos: { x: number; y: number }) => void,
     imageInputRef?: React.RefObject<HTMLInputElement | null>,
     clickPos?: React.MutableRefObject<{ x: number; y: number }>
 ) => {
@@ -26,19 +29,42 @@ export const useEditorTools = (
     const tempAnnotation = useRef<Annotation | null>(null);
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
-    // 取得Canvas座標
+    // 取得畫布座標 (支援逆旋轉)
     const getCanvasCoordinates = useCallback(
-        (e: MouseEvent): { x: number; y: number } => {
-            const canvas = canvasRef.current;
-            if (!canvas) return { x: 0, y: 0 };
+        (e: MouseEvent | PointerEvent): { x: number; y: number; localX: number; localY: number } => {
+            const layer = interactionLayerRef.current;
+            if (!layer) return { x: 0, y: 0, localX: 0, localY: 0 };
 
-            const rect = canvas.getBoundingClientRect();
-            // 轉換為原始比例座標(1.0 scale)
-            const x = (e.clientX - rect.left) / scale;
-            const y = (e.clientY - rect.top) / scale;
-            return { x, y };
+            const rect = layer.getBoundingClientRect();
+
+            // 1. 取得相對於 InteractionLayer 的點擊座標 (已被 CSS 旋轉影響)
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // 2. 執行逆旋轉轉回原始座標系 (以中心點旋轉)
+            const cx = rect.width / 2;
+            const cy = rect.height / 2;
+            const rad = -rotation * (Math.PI / 180);
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+
+            const dx = x - cx;
+            const dy = y - cy;
+            const rx = dx * cos - dy * sin;
+            const ry = dx * sin + dy * cos;
+
+            const localX = rx + cx;
+            const localY = ry + cy;
+
+            // 3. 轉換為原始比例座標 (去除 scale)
+            return {
+                x: localX / scale,
+                y: localY / scale,
+                localX, // 螢幕比例座標 (用於 Cursor Preview)
+                localY
+            };
         },
-        [canvasRef, scale]
+        [interactionLayerRef, rotation, scale]
     );
 
     // 繪製臨時標註
@@ -280,14 +306,14 @@ export const useEditorTools = (
 
     // 滑鼠按下
     const handleMouseDown = useCallback(
-        (e: MouseEvent) => {
-            const pos = getCanvasCoordinates(e);
+        (e: MouseEvent | PointerEvent) => {
+            const { x, y } = getCanvasCoordinates(e);
 
             if (activeTool === 'image') {
-                console.log('Detected Image Tool Click at:', pos);
+                console.log('Detected Image Tool Click at:', { x, y });
                 const input = imageInputRef?.current;
                 if (input && clickPos) {
-                    clickPos.current = pos;
+                    clickPos.current = { x, y };
 
                     // 【關鍵修正】: 即時綁定處理器，避開 useEffect 初始化失敗問題
                     input.onchange = (ev: any) => {
@@ -301,14 +327,14 @@ export const useEditorTools = (
                             const imageData = readerEv.target?.result as string;
                             const img = new Image();
                             img.onload = () => {
-                                console.log('Image input: Adding annotation at', pos);
+                                console.log('Image input: Adding annotation at', { x, y });
                                 const annotation: Annotation = {
                                     id: `image-${Date.now()}`,
                                     type: 'image',
                                     pageId: currentPageId,
                                     data: {
-                                        x: pos.x,
-                                        y: pos.y,
+                                        x,
+                                        y,
                                         width: img.width / 2,
                                         height: img.height / 2,
                                         imageData,
@@ -338,8 +364,8 @@ export const useEditorTools = (
             if (activeTool === 'hand') return;
 
             isDrawing.current = true;
-            startPos.current = pos;
-            currentPath.current = [pos];
+            startPos.current = { x, y };
+            currentPath.current = [{ x, y }];
 
             // 建立臨時標註
             const baseAnnotation = {
@@ -357,7 +383,7 @@ export const useEditorTools = (
                     tempAnnotation.current = {
                         ...baseAnnotation,
                         data: {
-                            points: [pos],
+                            points: [{ x, y }],
                             color: settings.drawColor || '#000000',
                             thickness: settings.drawThickness || 2,
                         },
@@ -368,7 +394,7 @@ export const useEditorTools = (
                     tempAnnotation.current = {
                         ...baseAnnotation,
                         data: {
-                            points: [pos],
+                            points: [{ x, y }],
                             size: settings.eraserSize || 20,
                         },
                     } as Annotation;
@@ -379,8 +405,8 @@ export const useEditorTools = (
                         ...baseAnnotation,
                         data: {
                             shapeType: activeShape,
-                            x: pos.x,
-                            y: pos.y,
+                            x,
+                            y,
                             width: 0,
                             height: 0,
                             borderColor: settings.shapeBorderColor || '#000000',
@@ -396,8 +422,8 @@ export const useEditorTools = (
                         ...baseAnnotation,
                         data: {
                             text: '',
-                            x: pos.x,
-                            y: pos.y,
+                            x,
+                            y,
                             fontSize: settings.fontSize || 16,
                             fontFamily: 'Arial',
                             color: settings.textColor || '#000000',
@@ -409,7 +435,7 @@ export const useEditorTools = (
                     tempAnnotation.current = {
                         ...baseAnnotation,
                         data: {
-                            points: [pos],
+                            points: [{ x, y }],
                             color: settings.highlightColor || '#FFFF00',
                             size: settings.highlightSize || 20,
                             opacity: settings.highlightOpacity || 0.3,
@@ -429,23 +455,26 @@ export const useEditorTools = (
 
     // 滑鼠移動
     const handleMouseMove = useCallback(
-        (e: MouseEvent) => {
-            if (!isDrawing.current || !tempAnnotation.current) return;
+        (e: MouseEvent | PointerEvent) => {
+            const { x, y, localX, localY } = getCanvasCoordinates(e);
 
-            const pos = getCanvasCoordinates(e);
+            // 更新游標預覽位置
+            setCursorPosition({ x: localX, y: localY });
+
+            if (!isDrawing.current || !tempAnnotation.current) return;
 
             switch (activeTool) {
                 case 'draw':
                 case 'eraser':
                 case 'highlight':
-                    currentPath.current.push(pos);
+                    currentPath.current.push({ x, y });
                     tempAnnotation.current.data.points = [...currentPath.current];
                     break;
 
                 case 'shape':
                     // 更新結束位置
-                    tempAnnotation.current.data.width = pos.x - startPos.current.x;
-                    tempAnnotation.current.data.height = pos.y - startPos.current.y;
+                    tempAnnotation.current.data.width = x - startPos.current.x;
+                    tempAnnotation.current.data.height = y - startPos.current.y;
                     break;
                     break;
             }
@@ -509,21 +538,26 @@ export const useEditorTools = (
 
     // 註冊事件監聽
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        const layer = interactionLayerRef.current;
+        if (!layer) return;
 
-        canvas.addEventListener('mousedown', handleMouseDown);
-        canvas.addEventListener('mousemove', handleMouseMove);
-        canvas.addEventListener('mouseup', handleMouseUp);
-        canvas.addEventListener('mouseleave', handleMouseUp);
+        const onPointerDown = (e: PointerEvent) => {
+            layer.setPointerCapture(e.pointerId);
+            handleMouseDown(e);
+        };
+
+        layer.addEventListener('pointerdown', onPointerDown);
+        layer.addEventListener('pointermove', handleMouseMove);
+        layer.addEventListener('pointerup', handleMouseUp);
+        layer.addEventListener('pointerleave', handleMouseUp);
 
         return () => {
-            canvas.removeEventListener('mousedown', handleMouseDown);
-            canvas.removeEventListener('mousemove', handleMouseMove);
-            canvas.removeEventListener('mouseup', handleMouseUp);
-            canvas.removeEventListener('mouseleave', handleMouseUp);
+            layer.removeEventListener('pointerdown', onPointerDown);
+            layer.removeEventListener('pointermove', handleMouseMove);
+            layer.removeEventListener('pointerup', handleMouseUp);
+            layer.removeEventListener('pointerleave', handleMouseUp);
         };
-    }, [canvasRef, handleMouseDown, handleMouseMove, handleMouseUp]);
+    }, [interactionLayerRef, handleMouseDown, handleMouseMove, handleMouseUp]);
 
     return {
         isDrawing: isDrawing.current,

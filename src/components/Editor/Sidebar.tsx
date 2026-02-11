@@ -28,21 +28,27 @@ export const Sidebar: React.FC = () => {
             for (const page of pages) {
                 if (isCancelled) break;
 
-                // 如果已經有該 ID 的縮圖，跳過（除非是重新開啟文檔）
-                if (thumbnails[page.id]) continue;
+                // 快取鍵包含旋轉角度，確保旋轉時會更新縮圖
+                const thumbKey = `${page.id}-${page.rotation}`;
+                if (thumbnails[thumbKey]) continue;
 
                 if (page.type === 'blank') {
-                    setThumbnails(prev => ({ ...prev, [page.id]: 'BLANK' }));
+                    setThumbnails(prev => ({ ...prev, [thumbKey]: 'BLANK' }));
                     continue;
                 }
 
                 try {
                     const canvas = document.createElement('canvas');
-                    await pdfRenderer.renderThumbnail(page.originalIndex!, canvas, 150);
+                    await pdfRenderer.renderThumbnail(
+                        page.originalIndex!,
+                        canvas,
+                        150,
+                        page.rotation
+                    );
                     const dataUrl = canvas.toDataURL();
 
                     if (!isCancelled) {
-                        setThumbnails(prev => ({ ...prev, [page.id]: dataUrl }));
+                        setThumbnails(prev => ({ ...prev, [thumbKey]: dataUrl }));
                     }
                 } catch (err) {
                     console.error(`Failed to render thumbnail for page ${page.id}:`, err);
@@ -55,7 +61,7 @@ export const Sidebar: React.FC = () => {
         return () => {
             isCancelled = true;
         };
-    }, [pdfDocument, pages]); // 當頁面結構變動時檢查
+    }, [pdfDocument, pages]); // 當頁面結構或旋轉變動時檢查
 
     if (!sidebarOpen) return null;
 
@@ -120,7 +126,7 @@ export const Sidebar: React.FC = () => {
                     {pages.map((page, index) => {
                         const pageNum = index + 1;
                         const isActive = pageNum === currentPage;
-                        const thumb = thumbnails[page.id];
+                        const thumb = thumbnails[`${page.id}-${page.rotation}`];
 
                         return (
                             <motion.div

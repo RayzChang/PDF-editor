@@ -1,6 +1,5 @@
 
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Maximize, Save } from 'lucide-react';
 import { useEditorStore } from '../../store/editor-store';
@@ -18,19 +17,21 @@ export const PDFViewer: React.FC = () => {
     const pdfCanvasRef = useRef<HTMLCanvasElement>(null);
     const annotationCanvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const interactionLayerRef = useRef<HTMLDivElement>(null);
 
     const {
-        pdfDocument, pages, currentPage, scale, rotation, annotations,
-        updateAnnotation, addAnnotation, activeTool, toolSettings,
+        pdfDocument, pages, currentPage, scale, annotations,
+        updateAnnotation, addAnnotation, activeTool,
         setNativeTextItems
     } = useEditorStore();
     const currentPageId = pages[currentPage - 1]?.id;
     const currentPageInfo = pages[currentPage - 1];
+    const rotation = currentPageInfo?.rotation || 0;
     const { setLoading, setError } = useUIStore();
 
     // 動態游標狀態
-    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [isHoveringCanvas, setIsHoveringCanvas] = useState(false);
+    const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
 
     // 文字編輯狀態
     const [editingTextId, setEditingTextId] = useState<string | null>(null);
@@ -39,7 +40,7 @@ export const PDFViewer: React.FC = () => {
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
     // 使用編輯工具Hook
-    useEditorTools(annotationCanvasRef, pdfCanvasRef, imageInputRef, clickPos);
+    useEditorTools(annotationCanvasRef, pdfCanvasRef, interactionLayerRef, rotation, setCursorPosition, imageInputRef, clickPos);
 
     // 使用手抓工具Hook
     useHandTool(containerRef);
@@ -49,8 +50,9 @@ export const PDFViewer: React.FC = () => {
 
     // 使用選取工具Hook(支援拖曳和雙擊編輯)
     const { selectedAnnotation } = useSelectTool(
-        annotationCanvasRef,
-        (annotationId) => setEditingTextId(annotationId)
+        interactionLayerRef,
+        rotation,
+        (annotationId: string) => setEditingTextId(annotationId)
     );
 
     // 渲染PDF頁面
@@ -69,88 +71,62 @@ export const PDFViewer: React.FC = () => {
                     ctx.fillRect(0, 0, pdfCanvasRef.current.width, pdfCanvasRef.current.height);
                 }
             } else {
-                // 1. 預先計算 Viewport 並設定 Canvas 尺寸，避免渲染前的閃爍或尺寸錯誤
-                const page = await pdfDocument.getPage(currentPageInfo?.originalIndex || 1);
-                const viewport = page.getViewport({ scale, rotation });
+                // 1. 預先計算 Viewport 並設定 Canvas 尺寸
+                // 關鍵：渲染器仍然可以使用 rotation，或者我們永遠渲染 0 並用 CSS 旋轉。
+                // 為了效能與文字座標對齊一致，我們採用：「渲染 0 度」並搭配「CSS 旋轉」。
+                const pageNum = currentPageInfo?.originalIndex || 1;
+                const page = await pdfDocument.getPage(pageNum);
+
+                // 固定使用 rotation: 0 渲染
+                const viewport = page.getViewport({ scale, rotation: 0 });
 
                 if (pdfCanvasRef.current) {
                     pdfCanvasRef.current.width = viewport.width;
                     pdfCanvasRef.current.height = viewport.height;
                 }
 
-                // 2. 執行渲染
+                // 2. 執行渲染 (固定 0 度)
                 await pdfRenderer.renderPage(
-                    currentPageInfo?.originalIndex || 1,
+                    pageNum,
                     pdfCanvasRef.current,
                     scale,
-                    rotation
+                    0
                 );
+
+                // 3. 提取原生文字物件 (pdfRenderer 內部也固定 0 度)
+                const nativeItems = await pdfRenderer.getPageTextContent(pageNum);
+                setNativeTextItems(nativeItems);
             }
 
-            // 3. 確保標註 Canvas 與 PDF Canvas 尺寸完全同步
-            // 必須在渲染完成後執行，確保尺寸正確
+            // 確保標註 Canvas 與 PDF Canvas 尺寸完全同步
             if (annotationCanvasRef.current && pdfCanvasRef.current) {
                 const width = pdfCanvasRef.current.width;
                 const height = pdfCanvasRef.current.height;
 
-                // 只有當尺寸不符時才重設，避免不必要的重繪
                 if (annotationCanvasRef.current.width !== width || annotationCanvasRef.current.height !== height) {
                     annotationCanvasRef.current.width = width;
                     annotationCanvasRef.current.height = height;
                 }
 
-                // 重繪標註
                 renderAnnotations();
-
-                // 提取原生文字物件
-                const page = await pdfDocument.getPage(currentPageInfo?.originalIndex || 1);
-                const textContent = await page.getTextContent();
-                const viewport = page.getViewport({ scale: 1.0, rotation }); // 取原始比例座標
-
-                const nativeItems = textContent.items.map((item: any, index: number) => {
-                    const [a, b, , , e, f] = item.transform;
-                    const fontSize = Math.sqrt(a * a + b * b);
-                    // Fallback to fontSize if item.height is missing or too small
-                    const height = (item.height && item.height > 0) ? item.height : fontSize;
-
-                    return {
-                        id: `native-${index}`,
-                        text: item.str,
-                        width: item.width,
-                        height: height,
-                        x: e,
-                        // Ensure y is Top-Left of the box. 
-                        // f is baseline from bottom.
-                        // viewport.viewBox[3] - f is baseline from top.
-                        // We want top of box, so subtract height (which is ascent approx).
-                        y: viewport.viewBox[3] - f - height,
-                        fontSize: fontSize,
-                        fontFamily: item.fontName,
-                        transform: item.transform
-                    };
-                });
-                setNativeTextItems(nativeItems);
 
                 // --- VERIFICATION LOG START ---
                 if (pdfCanvasRef.current && containerRef.current) {
                     console.log('[VERIFY]',
                         'scale=', scale,
-                        'canvas_attr_w=', pdfCanvasRef.current.width,
-                        'canvas_css_w=', pdfCanvasRef.current.getBoundingClientRect().width,
-                        'container_clientW=', containerRef.current.clientWidth,
-                        'container_scrollW=', containerRef.current.scrollWidth
+                        'rotation=', rotation,
+                        'canvas_w=', pdfCanvasRef.current.width,
+                        'canvas_h=', pdfCanvasRef.current.height
                     );
                 }
                 // --- VERIFICATION LOG END ---
             }
         } catch (error) {
             console.error('渲染頁面失敗:', error);
-            // Ignore rendering errors caused by cancellation
-            // setError('渲染頁面失敗'); 
         } finally {
             setLoading(false);
         }
-    }, [pdfDocument, currentPageInfo, scale, rotation, setLoading, setError, setNativeTextItems]);
+    }, [pdfDocument, currentPageInfo, scale, rotation, setLoading, setNativeTextItems]);
 
     // 渲染標註
     const renderAnnotations = useCallback(() => {
@@ -403,7 +379,7 @@ export const PDFViewer: React.FC = () => {
         }
     }, [pdfDocument, currentPageId, renderPage, currentPageInfo]);
 
-    // 縮放或旋轉時僅重新渲染，不觸發置中
+    // 縮放或旋轉時僅重新渲染 (這部分已整合進 renderPage 的依賴，但為了保險保留監聽)
     useEffect(() => {
         if (pdfDocument) {
             renderPage();
@@ -415,9 +391,8 @@ export const PDFViewer: React.FC = () => {
         renderAnnotations();
     }, [annotations, renderAnnotations]);
 
-    // 處理原生文字點擊
+    // 處理原生文字點擊 (原生座標已固定為 0 度座標)
     const handleNativeTextClick = useCallback((item: any) => {
-        // 1. 建立一個新的文字標註來「覆蓋」原始文字
         const newTextAnnotation = {
             id: `text-edit-${Date.now()}`,
             type: 'text' as const,
@@ -430,13 +405,12 @@ export const PDFViewer: React.FC = () => {
                 width: item.width,
                 fontSize: item.fontSize,
                 color: '#000000',
-                fontFamily: 'Arial', // Fallback
-                isNativeEdit: true, // 標記為原生編輯
+                fontFamily: 'Arial',
+                isNativeEdit: true,
                 originalTextId: item.id
             }
         };
 
-        // 2. 新增標註
         addAnnotation(newTextAnnotation);
         setEditingTextId(newTextAnnotation.id);
     }, [currentPageId, addAnnotation]);
@@ -448,7 +422,6 @@ export const PDFViewer: React.FC = () => {
         const lastAnnotation = annotations[annotations.length - 1];
         const now = Date.now();
 
-        // 如果是剛剛新增的標註(1秒內)
         if (now - lastAnnotation.timestamp < 1000) {
             if (lastAnnotation.type === 'text' && !lastAnnotation.data.text) {
                 setEditingTextId(lastAnnotation.id);
@@ -463,8 +436,6 @@ export const PDFViewer: React.FC = () => {
 
         const handleCenterCanvas = () => {
             if (!container) return;
-
-            // 標準捲動重置：回到頂部中心
             requestAnimationFrame(() => {
                 container.scrollTo({
                     top: 0,
@@ -475,18 +446,15 @@ export const PDFViewer: React.FC = () => {
         };
 
         window.addEventListener('centerCanvas', handleCenterCanvas);
-
-        // 渲染完成後自動執行一次
         const timeoutId = setTimeout(handleCenterCanvas, 100);
 
         return () => {
             window.removeEventListener('centerCanvas', handleCenterCanvas);
             clearTimeout(timeoutId);
         };
-    }, [pdfDocument]); // Only re-center on document load, NOT on scale/rotation changes
+    }, [pdfDocument]);
 
     if (!pdfDocument) {
-
         return (
             <div
                 style={{
@@ -509,172 +477,165 @@ export const PDFViewer: React.FC = () => {
         );
     }
 
-    const getHighlightRgb = (hex: string) => {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : { r: 255, g: 255, b: 0 };
-    };
-
-    const highlightColor = getHighlightRgb(toolSettings.highlightColor);
+    // 計算視覺寬高 (考慮旋轉)
+    const isRotated90 = rotation === 90 || rotation === 270;
+    const canvasWidth = pdfCanvasRef.current?.width || 0;
+    const canvasHeight = pdfCanvasRef.current?.height || 0;
+    const visualWidth = isRotated90 ? canvasHeight : canvasWidth;
+    const visualHeight = isRotated90 ? canvasWidth : canvasHeight;
 
     return (
         <div
             ref={containerRef}
             className="pdf-viewer-container"
             style={{
-                flex: 1, // Ensure container fills available space
+                flex: 1,
                 width: '100%',
                 height: '100%',
-                minWidth: 0,  // Allow shrinking
-                minHeight: 0, // Allow shrinking
+                minWidth: 0,
+                minHeight: 0,
                 background: '#475569',
-                overflow: 'auto', // Scroll bars appear here
+                overflow: 'auto',
                 position: 'relative',
-                display: 'block', // Changed from flex to block to allow natural overflow
+                display: 'block',
             }}
         >
             <div
                 className="pdf-render-area"
                 style={{
                     padding: '80px',
-                    margin: '0 auto', // Center horizontally if smaller than container
+                    margin: '0 auto',
                     display: 'flex',
                     justifyContent: 'center',
                     alignItems: 'flex-start',
-                    width: 'max-content', // Forces container to recognize full width
+                    width: 'max-content',
                     minHeight: '100%',
-                    minWidth: 0,  // Avoid expanding parent
+                    minWidth: 0,
                     position: 'relative'
                 }}
             >
                 {pdfDocument && (
                     <div
-                        className="page-container"
+                        className="visual-page-wrapper"
                         style={{
+                            width: visualWidth,
+                            height: visualHeight,
                             position: 'relative',
-                            boxShadow: 'var(--shadow-xl)',
-                            background: 'white',
-                            // Ensure no max-width constraints
-                            maxWidth: 'unset',
+                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                         }}
                     >
-                        {/* PDF 渲染層 */}
-                        <canvas
-                            key={`${currentPage}-${scale}-${rotation}`}
-                            ref={pdfCanvasRef}
-                            style={{
-                                display: 'block',
-                                // Ensure no fixed width/height constraints via CSS
-                                maxWidth: 'unset',
-                                width: 'auto',
-                                height: 'auto'
-                            }}
-                        />
-
-                        {/* 標註畫布層 */}
-                        <canvas
-                            ref={annotationCanvasRef}
-                            onMouseMove={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setMousePos({
-                                    x: e.clientX - rect.left,
-                                    y: e.clientY - rect.top
-                                });
-                            }}
-                            onMouseEnter={() => setIsHoveringCanvas(true)}
-                            onMouseLeave={() => setIsHoveringCanvas(false)}
+                        <div
+                            className="page-container"
                             style={{
                                 position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                zIndex: 10,
-                                pointerEvents: activeTool === 'hand' ? 'none' : 'auto',
-                                cursor: (['draw', 'eraser', 'highlight'].includes(activeTool) && isHoveringCanvas) ? 'none' : 'auto',
+                                boxShadow: 'var(--shadow-xl)',
+                                background: 'white',
+                                width: canvasWidth,
+                                height: canvasHeight,
+                                transformOrigin: 'top left',
+                                // 修正旋轉後的平移量，確保 Top-Left 座標系正確旋轉
+                                transform: `rotate(${rotation}deg) translate(${rotation === 90 ? '0, -100%' :
+                                    rotation === 180 ? '-100%, -100%' :
+                                        rotation === 270 ? '-100%, 0' : '0, 0'
+                                    })`,
+                                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                             }}
-                        />
-
-                        {/* 原生文字偵測層 - Z-Index changed to 20 to be above AnnotationCanvas (10) */}
-                        <div style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            height: '100%',
-                            zIndex: 20,
-                            // CRITICAL FIX: If activeTool is 'hand', disable ALL pointer events so drag passes through to container
-                            pointerEvents: activeTool === 'hand' ? 'none' : 'none' // Container is none, children are auto (see NativeTextLayer)
-                            // Actually, we can't easily control children via parent pointer-events: none unless we pass a prop.
-                            // BUT, if parent is none, children can be auto.
-                            // To BLOCK children, we need to hide it or pass prop.
-                            // Let's pass a prop to NativeTextLayer or check activeTool inside it?
-                            // NativeTextLayer checks activeTool! 
-                            // Let's rely on NativeTextLayer's internal check:
-                            // if (activeTool !== 'text' && activeTool !== 'select') return null;
-                            // This means if 'hand' is active, NativeTextLayer returns NULL (doesn't render).
-                            // So text shouldn't be blocking?
-                            // Wait, let's verify NativeTextLayer logic.
-                        }}>
-                            <NativeTextLayer
-                                scale={scale}
-                                onTextClick={handleNativeTextClick}
-                            />
-                        </div>
-
-                        {/* 動態尺寸游標預覽 */}
-                        {isHoveringCanvas && ['draw', 'eraser', 'highlight'].includes(activeTool) && (
-                            <motion.div
-                                animate={{
-                                    x: mousePos.x,
-                                    y: mousePos.y,
+                        >
+                            {/* PDF 渲染層 (固定 0 度) */}
+                            <canvas
+                                key={`${currentPage}-${scale}`}
+                                ref={pdfCanvasRef}
+                                style={{
+                                    display: 'block',
+                                    maxWidth: 'unset',
+                                    width: 'auto',
+                                    height: 'auto'
                                 }}
-                                transition={{ type: 'spring', damping: 30, stiffness: 600, mass: 0.1 }}
+                            />
+
+                            {/* 標註畫布層 */}
+                            <canvas
+                                ref={annotationCanvasRef}
+                                onMouseMove={() => {
+                                    // 游標位置暫不追蹤
+                                }}
+                                onMouseEnter={() => setIsHoveringCanvas(true)}
+                                onMouseLeave={() => setIsHoveringCanvas(false)}
                                 style={{
                                     position: 'absolute',
                                     top: 0,
                                     left: 0,
-                                    zIndex: 100,
+                                    zIndex: 10,
                                     pointerEvents: 'none',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
                                 }}
-                            >
+                            />
+
+                            {/* 原生文字偵測層 */}
+                            <div style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: '100%',
+                                zIndex: 20,
+                                pointerEvents: 'none'
+                            }}>
+                                <NativeTextLayer
+                                    scale={scale}
+                                    onTextClick={handleNativeTextClick}
+                                />
+                            </div>
+
+                            {/* 統一事件接收層 (最上層) */}
+                            <div
+                                ref={interactionLayerRef}
+                                className="interaction-layer"
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    height: '100%',
+                                    zIndex: 50,
+                                    cursor: activeTool === 'hand' ? 'grab' : 'crosshair',
+                                    pointerEvents: activeTool === 'hand' ? 'none' : 'auto'
+                                }}
+                            />
+
+                            {/* 游標預覽器 (Cursor Preview) */}
+                            {isHoveringCanvas && activeTool !== 'select' && activeTool !== 'hand' && (
                                 <div
                                     style={{
-                                        width: (activeTool === 'draw' ? toolSettings.drawThickness :
-                                            activeTool === 'eraser' ? toolSettings.eraserSize :
-                                                toolSettings.highlightSize) * scale,
-                                        height: (activeTool === 'draw' ? toolSettings.drawThickness :
-                                            activeTool === 'eraser' ? toolSettings.eraserSize :
-                                                toolSettings.highlightSize) * scale,
-                                        border: '1.5px solid rgba(0, 0, 0, 0.4)',
+                                        position: 'absolute',
+                                        left: 0,
+                                        top: 0,
+                                        width: (activeTool === 'eraser' ? 20 : 2) * scale,
+                                        height: (activeTool === 'eraser' ? 20 : 2) * scale,
                                         borderRadius: '50%',
-                                        boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.6)',
-                                        background: activeTool === 'highlight' ?
-                                            `rgba(${highlightColor.r}, ${highlightColor.g}, ${highlightColor.b}, 0.4)` :
-                                            'transparent',
-                                        transform: 'translate(-50%, -50%)',
+                                        border: '1px solid #3b82f6',
+                                        backgroundColor: activeTool === 'eraser' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(59, 130, 246, 0.2)',
+                                        pointerEvents: 'none',
+                                        zIndex: 60,
+                                        transform: `translate(-50%, -50%) translate(${cursorPosition.x}px, ${cursorPosition.y}px)`,
+                                        boxShadow: '0 0 4px rgba(0,0,0,0.2)'
                                     }}
                                 />
-                            </motion.div>
-                        )}
+                            )}
 
-                        {/* 文字編輯器 */}
-                        {editingTextId && (() => {
-                            const ann = annotations.find(a => a.id === editingTextId);
-                            if (!ann) return null;
-                            return (
-                                <TextEditor
-                                    annotation={ann}
-                                    scale={scale}
-                                    onUpdate={(updates) => updateAnnotation(editingTextId, { ...ann.data, ...updates })}
-                                    onClose={() => setEditingTextId(null)}
-                                />
-                            );
-                        })()}
+                            {/* 文字編輯器 */}
+                            {editingTextId && (() => {
+                                const ann = annotations.find(a => a.id === editingTextId);
+                                if (!ann) return null;
+                                return (
+                                    <TextEditor
+                                        annotation={ann}
+                                        scale={scale}
+                                        onUpdate={(updates) => updateAnnotation(editingTextId, { ...ann.data, ...updates })}
+                                        onClose={() => setEditingTextId(null)}
+                                    />
+                                );
+                            })()}
+                        </div>
                     </div>
                 )}
             </div>
@@ -754,7 +715,8 @@ export const PDFViewer: React.FC = () => {
                             }
                             const { modifyPageText } = await import('../../lib/pdf-editor');
                             for (const [pageIndex, mods] of editsByPage.entries()) {
-                                currentBytes = await modifyPageText(currentBytes, pageIndex, mods);
+                                const pageInfo = pages.find(p => p.type === 'original' && p.originalIndex === pageIndex + 1);
+                                currentBytes = await modifyPageText(currentBytes, pageIndex, mods, pageInfo?.rotation || 0);
                             }
                         }
 

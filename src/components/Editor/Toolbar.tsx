@@ -49,10 +49,13 @@ export const Toolbar: React.FC = () => {
         setActiveTool,
         undo,
         redo,
-        setRotation,
-        rotation,
+        setPageRotation,
         pages,
+        currentPage,
     } = useEditorStore();
+
+    const currentPageInfo = pages[currentPage - 1];
+    const rotation = currentPageInfo?.rotation || 0;
 
     const { sidebarOpen, toggleSidebar, setLoading, setError } = useUIStore();
 
@@ -86,6 +89,7 @@ export const Toolbar: React.FC = () => {
         setLoading(true);
         try {
             const pdfDoc = await PDFEditor.loadPDF(pdfFile);
+            // 注意：這裡是整合原本的 applyAnnotations，可能也需要修正以支援每頁不同旋轉
             const finalDoc = await PDFEditor.applyAnnotations(pdfDoc, annotations, pages);
             await PDFEditor.downloadPDF(finalDoc, fileName.replace('.pdf', '_edited.pdf'));
         } catch (error) {
@@ -107,9 +111,17 @@ export const Toolbar: React.FC = () => {
     const handleZoomOut = () => setScale(scale - 0.25);
     const handleFitPage = () => setScale(1.0);
 
-    // 旋轉
-    const rotateLeft = () => setRotation((rotation - 90 + 360) % 360);
-    const rotateRight = () => setRotation((rotation + 90) % 360);
+    // 旋轉 (改為每頁獨立)
+    const rotateLeft = () => {
+        if (currentPageInfo) {
+            setPageRotation(currentPageInfo.id, (rotation - 90 + 360) % 360);
+        }
+    };
+    const rotateRight = () => {
+        if (currentPageInfo) {
+            setPageRotation(currentPageInfo.id, (rotation + 90) % 360);
+        }
+    };
 
     // 工具按鈕
     const tools: { id: Tool; icon: React.ReactNode; label: string }[] = [

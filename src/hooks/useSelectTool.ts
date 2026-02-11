@@ -3,7 +3,8 @@ import { useEditorStore } from '../store/editor-store';
 import type { Annotation } from '../store/editor-store';
 
 export const useSelectTool = (
-    canvasRef: React.RefObject<HTMLCanvasElement | null>,
+    interactionLayerRef: React.RefObject<HTMLDivElement | null>,
+    rotation: number,
     onTextClick: (annotationId: string) => void
 ) => {
     const { activeTool, annotations, currentPage, pages, updateAnnotation, scale } = useEditorStore();
@@ -13,6 +14,34 @@ export const useSelectTool = (
     const [activeHandle, setActiveHandle] = useState<string | null>(null); // 'nw', 'ne', 'sw', 'se'
     const dragStart = useRef({ x: 0, y: 0 });
     const annotationStart = useRef<{ x: number; y: number; width: number; height: number; points?: { x: number; y: number }[] }>({ x: 0, y: 0, width: 0, height: 0 });
+
+    const getCanvasCoordinates = useCallback(
+        (e: MouseEvent | PointerEvent): { x: number; y: number } => {
+            const layer = interactionLayerRef.current;
+            if (!layer) return { x: 0, y: 0 };
+
+            const rect = layer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const cx = rect.width / 2;
+            const cy = rect.height / 2;
+            const rad = -rotation * (Math.PI / 180);
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+
+            const dx = x - cx;
+            const dy = y - cy;
+            const rx = dx * cos - dy * sin;
+            const ry = dx * sin + dy * cos;
+
+            return {
+                x: (rx + cx) / scale,
+                y: (ry + cy) / scale
+            };
+        },
+        [interactionLayerRef, rotation, scale]
+    );
 
     const findAnnotationAtPoint = useCallback(
         (x: number, y: number): Annotation | null => {
@@ -99,15 +128,10 @@ export const useSelectTool = (
     );
 
     const handleMouseDown = useCallback(
-        (e: MouseEvent) => {
+        (e: MouseEvent | PointerEvent) => {
             if (activeTool !== 'select') return;
 
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / scale;
-            const y = (e.clientY - rect.top) / scale;
+            const { x, y } = getCanvasCoordinates(e);
 
             // 1. 先檢査是否點擊了已選中標註的縮放控制點
             if (selectedAnnotation) {
@@ -161,19 +185,14 @@ export const useSelectTool = (
                 setActiveHandle(null);
             }
         },
-        [activeTool, canvasRef, scale, findAnnotationAtPoint, onTextClick]
+        [activeTool, scale, findAnnotationAtPoint, onTextClick, getCanvasCoordinates, annotations, selectedAnnotation]
     );
 
     const handleMouseMove = useCallback(
-        (e: MouseEvent) => {
+        (e: MouseEvent | PointerEvent) => {
             if (!isDragging || !selectedAnnotation || activeTool !== 'select') return;
 
-            const canvas = canvasRef.current;
-            if (!canvas) return;
-
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / scale;
-            const y = (e.clientY - rect.top) / scale;
+            const { x, y } = getCanvasCoordinates(e);
 
             const dx = x - dragStart.current.x;
             const dy = y - dragStart.current.y;
@@ -233,7 +252,7 @@ export const useSelectTool = (
 
             updateAnnotation(selectedAnnotation, newData);
         },
-        [isDragging, selectedAnnotation, activeTool, canvasRef, scale, annotations, updateAnnotation]
+        [isDragging, selectedAnnotation, activeTool, scale, annotations, updateAnnotation, getCanvasCoordinates, activeHandle]
     );
 
     const handleMouseUp = useCallback(() => {
@@ -258,19 +277,24 @@ export const useSelectTool = (
 
     // 註冊事件
     useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        const layer = interactionLayerRef.current;
+        if (!layer) return;
 
-        canvas.addEventListener('mousedown', handleMouseDown as any);
-        window.addEventListener('mousemove', handleMouseMove as any);
-        window.addEventListener('mouseup', handleMouseUp);
+        const onPointerDown = (e: PointerEvent) => {
+            layer.setPointerCapture(e.pointerId);
+            handleMouseDown(e);
+        };
+
+        layer.addEventListener('pointerdown', onPointerDown as any);
+        window.addEventListener('pointermove', handleMouseMove as any);
+        window.addEventListener('pointerup', handleMouseUp as any);
 
         return () => {
-            canvas.removeEventListener('mousedown', handleMouseDown as any);
-            window.removeEventListener('mousemove', handleMouseMove as any);
-            window.removeEventListener('mouseup', handleMouseUp);
+            layer.removeEventListener('pointerdown', onPointerDown as any);
+            window.removeEventListener('pointermove', handleMouseMove as any);
+            window.removeEventListener('pointerup', handleMouseUp as any);
         };
-    }, [canvasRef, handleMouseDown, handleMouseMove, handleMouseUp]);
+    }, [interactionLayerRef, handleMouseDown, handleMouseMove, handleMouseUp]);
 
     return { selectedAnnotation };
 };

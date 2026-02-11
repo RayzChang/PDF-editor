@@ -17,6 +17,7 @@ export interface PageInfo {
     id: string;
     type: 'original' | 'blank';
     originalIndex?: number; // 1-based, 僅當 type 為 'original' 時有效
+    rotation: number; // 獨立旋轉角度 (0, 90, 180, 270)
 }
 
 export interface Annotation {
@@ -49,6 +50,10 @@ export interface NativeTextItem {
     y: number;
     fontSize: number;
     fontFamily: string;
+    fontStyle?: 'normal' | 'italic';
+    fontWeight?: 'normal' | 'bold';
+    textDecoration?: 'none' | 'underline';
+    color?: string;
     transform: number[];
 }
 
@@ -87,6 +92,7 @@ export interface EditorState {
     setCurrentPage: (page: number) => void;
     setScale: (scale: number) => void;
     setRotation: (rotation: number) => void;
+    setPageRotation: (pageId: string, rotation: number) => void;
     setActiveTool: (tool: Tool) => void;
     setActiveShape: (shape: ShapeType) => void;
     updateToolSettings: (settings: Partial<ToolSettings>) => void;
@@ -141,7 +147,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const initialPages: PageInfo[] = Array.from({ length: numPages }).map((_, i) => ({
             id: `p-${i + 1}-${Date.now()}`,
             type: 'original',
-            originalIndex: i + 1
+            originalIndex: i + 1,
+            rotation: 0
         }));
 
         set({
@@ -170,6 +177,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     setRotation: (rotation) => {
         set({ rotation: (rotation + 360) % 360 });
+    },
+
+    setPageRotation: (pageId, rotation) => {
+        const { pages } = get();
+        set({
+            pages: pages.map(p =>
+                p.id === pageId ? { ...p, rotation: (rotation + 360) % 360 } : p
+            )
+        });
     },
 
     setActiveTool: (tool) => {
@@ -251,7 +267,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const { pages, currentPage } = get();
         const newPage: PageInfo = {
             id: `blank-${Date.now()}`,
-            type: 'blank'
+            type: 'blank',
+            rotation: 0
         };
 
         const newPages = [...pages];
