@@ -86,7 +86,7 @@ export const Toolbar: React.FC = () => {
         setLoading(true);
         try {
             const pdfDoc = await PDFEditor.loadPDF(pdfFile);
-            const finalDoc = await PDFEditor.applyAnnotations(pdfDoc, annotations, rotation, pages);
+            const finalDoc = await PDFEditor.applyAnnotations(pdfDoc, annotations, pages);
             await PDFEditor.downloadPDF(finalDoc, fileName.replace('.pdf', '_edited.pdf'));
         } catch (error) {
             console.error('儲存失敗:', error);

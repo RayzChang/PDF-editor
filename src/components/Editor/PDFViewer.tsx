@@ -246,7 +246,7 @@ export const PDFViewer: React.FC = () => {
 
                         if (data.isNativeEdit) {
                             ctx.fillStyle = '#FFFFFF';
-                            const w = (data.width || 0) * scale;
+                            // const w = (data.width || 0) * scale;
                             // Check if text grew wider than original box? 
                             // Actually, for native edit, we might want to measure the new text width!
                             // But for now, let's stick to the rect. 
@@ -746,7 +746,7 @@ export const PDFViewer: React.FC = () => {
                                     x: edit.data.x,
                                     y: edit.data.y,
                                     width: edit.data.width,
-                                    height: edit.data.fontSize,
+                                    height: edit.data.height || edit.data.fontSize,
                                     fontSize: edit.data.fontSize,
                                     fontFamily: edit.data.fontFamily,
                                     color: edit.data.color
