@@ -1,0 +1,85 @@
+{
+    "app": {
+        "title": "PDF 编辑器",
+        "subtitle": "专业的 PDF 编辑工具"
+    },
+    "toolbar": {
+        "file": "文件",
+        "open": "打开",
+        "save": "保存",
+        "export": "导出",
+        "undo": "撤销",
+        "redo": "重做",
+        "zoom": "缩放",
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+        "fitPage": "适合页面",
+        "fitWidth": "适合宽度"
+    },
+    "tools": {
+        "select": "选择",
+        "text": "文字",
+        "draw": "绘图",
+        "shape": "形状",
+        "highlight": "高亮",
+        "comment": "注释",
+        "image": "图片",
+        "eraser": "橡皮擦"
+    },
+    "shapes": {
+        "rectangle": "矩形",
+        "circle": "圆形",
+        "line": "线条",
+        "arrow": "箭头",
+        "polygon": "多边形"
+    },
+    "pages": {
+        "pages": "页面",
+        "page": "第 {{number}} 页",
+        "rotate": "旋转",
+        "delete": "删除",
+        "add": "添加页面",
+        "reorder": "重新排序"
+    },
+    "converter": {
+        "title": "格式转换",
+        "pdfToImage": "PDF 转图片",
+        "imageToPdf": "图片转 PDF",
+        "pdfToWord": "PDF 转 Word",
+        "wordToPdf": "Word 转 PDF",
+        "merge": "合并 PDF",
+        "split": "分割 PDF",
+        "convert": "转换",
+        "selectFormat": "选择格式",
+        "png": "PNG 图片",
+        "jpg": "JPG 图片",
+        "docx": "Word 文档"
+    },
+    "upload": {
+        "title": "上传文件",
+        "dragDrop": "拖放文件到此处",
+        "or": "或",
+        "browse": "浏览文件",
+        "uploading": "上传中...",
+        "processing": "处理中...",
+        "success": "上传成功",
+        "error": "上传失败"
+    },
+    "settings": {
+        "language": "语言",
+        "theme": "主题",
+        "light": "浅色",
+        "dark": "深色",
+        "auto": "自动"
+    },
+    "common": {
+        "cancel": "取消",
+        "confirm": "确认",
+        "close": "关闭",
+        "apply": "应用",
+        "reset": "重置",
+        "loading": "加载中...",
+        "error": "错误",
+        "success": "成功"
+    }
+}

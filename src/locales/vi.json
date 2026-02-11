@@ -1,0 +1,85 @@
+{
+    "app": {
+        "title": "Trình Chỉnh Sửa PDF",
+        "subtitle": "Công Cụ Chỉnh Sửa PDF Chuyên Nghiệp"
+    },
+    "toolbar": {
+        "file": "Tệp",
+        "open": "Mở",
+        "save": "Lưu",
+        "export": "Xuất",
+        "undo": "Hoàn tác",
+        "redo": "Làm lại",
+        "zoom": "Thu phóng",
+        "zoomIn": "Phóng to",
+        "zoomOut": "Thu nhỏ",
+        "fitPage": "Vừa trang",
+        "fitWidth": "Vừa chiều rộng"
+    },
+    "tools": {
+        "select": "Chọn",
+        "text": "Văn bản",
+        "draw": "Vẽ",
+        "shape": "Hình dạng",
+        "highlight": "Đánh dấu",
+        "comment": "Bình luận",
+        "image": "Hình ảnh",
+        "eraser": "Tẩy"
+    },
+    "shapes": {
+        "rectangle": "Hình chữ nhật",
+        "circle": "Hình tròn",
+        "line": "Đường thẳng",
+        "arrow": "Mũi tên",
+        "polygon": "Đa giác"
+    },
+    "pages": {
+        "pages": "Trang",
+        "page": "Trang {{number}}",
+        "rotate": "Xoay",
+        "delete": "Xóa",
+        "add": "Thêm trang",
+        "reorder": "Sắp xếp lại"
+    },
+    "converter": {
+        "title": "Chuyển Đổi Định Dạng",
+        "pdfToImage": "PDF sang Hình ảnh",
+        "imageToPdf": "Hình ảnh sang PDF",
+        "pdfToWord": "PDF sang Word",
+        "wordToPdf": "Word sang PDF",
+        "merge": "Gộp PDF",
+        "split": "Tách PDF",
+        "convert": "Chuyển đổi",
+        "selectFormat": "Chọn định dạng",
+        "png": "Hình ảnh PNG",
+        "jpg": "Hình ảnh JPG",
+        "docx": "Tài liệu Word"
+    },
+    "upload": {
+        "title": "Tải Tệp Lên",
+        "dragDrop": "Kéo và thả tệp vào đây",
+        "or": "hoặc",
+        "browse": "Duyệt Tệp",
+        "uploading": "Đang tải lên...",
+        "processing": "Đang xử lý...",
+        "success": "Tải lên thành công",
+        "error": "Tải lên thất bại"
+    },
+    "settings": {
+        "language": "Ngôn ngữ",
+        "theme": "Chủ đề",
+        "light": "Sáng",
+        "dark": "Tối",
+        "auto": "Tự động"
+    },
+    "common": {
+        "cancel": "Hủy",
+        "confirm": "Xác nhận",
+        "close": "Đóng",
+        "apply": "Áp dụng",
+        "reset": "Đặt lại",
+        "loading": "Đang tải...",
+        "error": "Lỗi",
+        "success": "Thành công"
+    }
+}

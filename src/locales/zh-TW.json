@@ -1,0 +1,85 @@
+{
+    "app": {
+        "title": "PDF 編輯器",
+        "subtitle": "專業的 PDF 編輯工具"
+    },
+    "toolbar": {
+        "file": "檔案",
+        "open": "開啟",
+        "save": "儲存",
+        "export": "匯出",
+        "undo": "復原",
+        "redo": "重做",
+        "zoom": "縮放",
+        "zoomIn": "放大",
+        "zoomOut": "縮小",
+        "fitPage": "符合頁面",
+        "fitWidth": "符合寬度"
+    },
+    "tools": {
+        "select": "選取",
+        "text": "文字",
+        "draw": "繪圖",
+        "shape": "形狀",
+        "highlight": "高亮",
+        "comment": "註解",
+        "image": "圖片",
+        "eraser": "橡皮擦"
+    },
+    "shapes": {
+        "rectangle": "矩形",
+        "circle": "圓形",
+        "line": "線條",
+        "arrow": "箭頭",
+        "polygon": "多邊形"
+    },
+    "pages": {
+        "pages": "頁面",
+        "page": "第 {{number}} 頁",
+        "rotate": "旋轉",
+        "delete": "刪除",
+        "add": "新增頁面",
+        "reorder": "重新排序"
+    },
+    "converter": {
+        "title": "格式轉換",
+        "pdfToImage": "PDF 轉圖片",
+        "imageToPdf": "圖片轉 PDF",
+        "pdfToWord": "PDF 轉 Word",
+        "wordToPdf": "Word 轉 PDF",
+        "merge": "合併 PDF",
+        "split": "分割 PDF",
+        "convert": "轉換",
+        "selectFormat": "選擇格式",
+        "png": "PNG 圖片",
+        "jpg": "JPG 圖片",
+        "docx": "Word 文件"
+    },
+    "upload": {
+        "title": "上傳檔案",
+        "dragDrop": "拖放檔案到此處",
+        "or": "或",
+        "browse": "瀏覽檔案",
+        "uploading": "上傳中...",
+        "processing": "處理中...",
+        "success": "上傳成功",
+        "error": "上傳失敗"
+    },
+    "settings": {
+        "language": "語言",
+        "theme": "主題",
+        "light": "淺色",
+        "dark": "深色",
+        "auto": "自動"
+    },
+    "common": {
+        "cancel": "取消",
+        "confirm": "確認",
+        "close": "關閉",
+        "apply": "套用",
+        "reset": "重設",
+        "loading": "載入中...",
+        "error": "錯誤",
+        "success": "成功"
+    }
+}

@@ -1,0 +1,85 @@
+{
+    "app": {
+        "title": "PDF Editor",
+        "subtitle": "Professional PDF Editing Tool"
+    },
+    "toolbar": {
+        "file": "File",
+        "open": "Open",
+        "save": "Save",
+        "export": "Export",
+        "undo": "Undo",
+        "redo": "Redo",
+        "zoom": "Zoom",
+        "zoomIn": "Zoom In",
+        "zoomOut": "Zoom Out",
+        "fitPage": "Fit Page",
+        "fitWidth": "Fit Width"
+    },
+    "tools": {
+        "select": "Select",
+        "text": "Text",
+        "draw": "Draw",
+        "shape": "Shape",
+        "highlight": "Highlight",
+        "comment": "Comment",
+        "image": "Image",
+        "eraser": "Eraser"
+    },
+    "shapes": {
+        "rectangle": "Rectangle",
+        "circle": "Circle",
+        "line": "Line",
+        "arrow": "Arrow",
+        "polygon": "Polygon"
+    },
+    "pages": {
+        "pages": "Pages",
+        "page": "Page {{number}}",
+        "rotate": "Rotate",
+        "delete": "Delete",
+        "add": "Add Page",
+        "reorder": "Reorder"
+    },
+    "converter": {
+        "title": "Format Converter",
+        "pdfToImage": "PDF to Image",
+        "imageToPdf": "Image to PDF",
+        "pdfToWord": "PDF to Word",
+        "wordToPdf": "Word to PDF",
+        "merge": "Merge PDF",
+        "split": "Split PDF",
+        "convert": "Convert",
+        "selectFormat": "Select Format",
+        "png": "PNG Image",
+        "jpg": "JPG Image",
+        "docx": "Word Document"
+    },
+    "upload": {
+        "title": "Upload File",
+        "dragDrop": "Drag and drop files here",
+        "or": "or",
+        "browse": "Browse Files",
+        "uploading": "Uploading...",
+        "processing": "Processing...",
+        "success": "Upload Successful",
+        "error": "Upload Failed"
+    },
+    "settings": {
+        "language": "Language",
+        "theme": "Theme",
+        "light": "Light",
+        "dark": "Dark",
+        "auto": "Auto"
+    },
+    "common": {
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "close": "Close",
+        "apply": "Apply",
+        "reset": "Reset",
+        "loading": "Loading...",
+        "error": "Error",
+        "success": "Success"
+    }
+}
