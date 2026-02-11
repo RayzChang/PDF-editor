@@ -93,6 +93,7 @@ export interface EditorState {
     setScale: (scale: number) => void;
     setRotation: (rotation: number) => void;
     setPageRotation: (pageId: string, rotation: number) => void;
+    rotateCurrentPage: (delta: number) => void;
     setActiveTool: (tool: Tool) => void;
     setActiveShape: (shape: ShapeType) => void;
     updateToolSettings: (settings: Partial<ToolSettings>) => void;
@@ -184,6 +185,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         set({
             pages: pages.map(p =>
                 p.id === pageId ? { ...p, rotation: (rotation + 360) % 360 } : p
+            )
+        });
+    },
+
+    rotateCurrentPage: (delta) => {
+        const { pages, currentPage } = get();
+        const pageIndex = currentPage - 1;
+        const page = pages[pageIndex];
+        if (!page) return;
+
+        const newRotation = (page.rotation + delta + 360) % 360;
+        set({
+            pages: pages.map((p, i) =>
+                i === pageIndex ? { ...p, rotation: newRotation } : p
             )
         });
     },

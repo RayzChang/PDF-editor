@@ -1,7 +1,6 @@
 
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Maximize, Save } from 'lucide-react';
 import { useEditorStore } from '../../store/editor-store';
 import { useUIStore } from '../../store/ui-store';
 import { pdfRenderer } from '../../lib/pdf-renderer';
@@ -24,10 +23,10 @@ export const PDFViewer: React.FC = () => {
         updateAnnotation, addAnnotation, activeTool,
         setNativeTextItems
     } = useEditorStore();
-    const currentPageId = pages[currentPage - 1]?.id;
     const currentPageInfo = pages[currentPage - 1];
-    const rotation = currentPageInfo?.rotation || 0;
-    const { setLoading, setError } = useUIStore();
+    const pageRotation = currentPageInfo?.rotation || 0;
+    const currentPageId = currentPageInfo?.id;
+    const { setLoading } = useUIStore();
 
     // 動態游標狀態
     const [isHoveringCanvas, setIsHoveringCanvas] = useState(false);
@@ -40,7 +39,7 @@ export const PDFViewer: React.FC = () => {
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
     // 使用編輯工具Hook
-    useEditorTools(annotationCanvasRef, pdfCanvasRef, interactionLayerRef, rotation, setCursorPosition, imageInputRef, clickPos);
+    useEditorTools(annotationCanvasRef, pdfCanvasRef, interactionLayerRef, setCursorPosition, imageInputRef, clickPos);
 
     // 使用手抓工具Hook
     useHandTool(containerRef);
@@ -51,7 +50,6 @@ export const PDFViewer: React.FC = () => {
     // 使用選取工具Hook(支援拖曳和雙擊編輯)
     const { selectedAnnotation } = useSelectTool(
         interactionLayerRef,
-        rotation,
         (annotationId: string) => setEditingTextId(annotationId)
     );
 
@@ -71,30 +69,17 @@ export const PDFViewer: React.FC = () => {
                     ctx.fillRect(0, 0, pdfCanvasRef.current.width, pdfCanvasRef.current.height);
                 }
             } else {
-                // 1. 預先計算 Viewport 並設定 Canvas 尺寸
-                // 關鍵：渲染器仍然可以使用 rotation，或者我們永遠渲染 0 並用 CSS 旋轉。
-                // 為了效能與文字座標對齊一致，我們採用：「渲染 0 度」並搭配「CSS 旋轉」。
+                // 1. 渲染本頁 PDF 到 Canvas，傳入當前頁的 true rotation
                 const pageNum = currentPageInfo?.originalIndex || 1;
-                const page = await pdfDocument.getPage(pageNum);
-
-                // 固定使用 rotation: 0 渲染
-                const viewport = page.getViewport({ scale, rotation: 0 });
-
-                if (pdfCanvasRef.current) {
-                    pdfCanvasRef.current.width = viewport.width;
-                    pdfCanvasRef.current.height = viewport.height;
-                }
-
-                // 2. 執行渲染 (固定 0 度)
                 await pdfRenderer.renderPage(
                     pageNum,
                     pdfCanvasRef.current,
                     scale,
-                    0
+                    pageRotation
                 );
 
-                // 3. 提取原生文字物件 (pdfRenderer 內部也固定 0 度)
-                const nativeItems = await pdfRenderer.getPageTextContent(pageNum);
+                // 2. 提取原生文字物件，同樣傳入當前頁旋轉，確保座標對齊
+                const nativeItems = await pdfRenderer.getPageTextContent(pageNum, pageRotation);
                 setNativeTextItems(nativeItems);
             }
 
@@ -114,7 +99,7 @@ export const PDFViewer: React.FC = () => {
                 if (pdfCanvasRef.current && containerRef.current) {
                     console.log('[VERIFY]',
                         'scale=', scale,
-                        'rotation=', rotation,
+                        'rotation=', pageRotation,
                         'canvas_w=', pdfCanvasRef.current.width,
                         'canvas_h=', pdfCanvasRef.current.height
                     );
@@ -126,7 +111,7 @@ export const PDFViewer: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [pdfDocument, currentPageInfo, scale, rotation, setLoading, setNativeTextItems]);
+    }, [pdfDocument, currentPageInfo?.id, scale, pageRotation, setLoading, setNativeTextItems]);
 
     // 渲染標註
     const renderAnnotations = useCallback(() => {
@@ -141,7 +126,7 @@ export const PDFViewer: React.FC = () => {
 
         // 繪製當前頁面的所有標註
         const pageAnnotations = annotations.filter(
-            (ann) => ann.pageId === currentPageId
+            (ann) => ann.pageId === currentPageInfo?.id
         );
 
         pageAnnotations.forEach((ann) => {
@@ -313,7 +298,7 @@ export const PDFViewer: React.FC = () => {
         // 繪製選取框與縮放拉柄
         if (selectedAnnotation) {
             const ann = annotations.find(a => a.id === selectedAnnotation);
-            if (ann && ann.pageId === currentPageId) {
+            if (ann && ann.pageId === currentPageInfo?.id) {
                 const data = ann.data;
                 let x = 0, y = 0, w = 0, h = 0;
 
@@ -379,12 +364,12 @@ export const PDFViewer: React.FC = () => {
         }
     }, [pdfDocument, currentPageId, renderPage, currentPageInfo]);
 
-    // 縮放或旋轉時僅重新渲染 (這部分已整合進 renderPage 的依賴，但為了保險保留監聽)
+    // 縮放或旋轉時僅重新渲染
     useEffect(() => {
         if (pdfDocument) {
             renderPage();
         }
-    }, [scale, rotation, renderPage, pdfDocument]);
+    }, [scale, pageRotation, renderPage, pdfDocument]);
 
     // 當標註變化時重新渲染標註層
     useEffect(() => {
@@ -396,7 +381,7 @@ export const PDFViewer: React.FC = () => {
         const newTextAnnotation = {
             id: `text-edit-${Date.now()}`,
             type: 'text' as const,
-            pageId: currentPageId,
+            pageId: currentPageInfo?.id || '',
             timestamp: Date.now(),
             data: {
                 text: item.text,
@@ -477,12 +462,11 @@ export const PDFViewer: React.FC = () => {
         );
     }
 
-    // 計算視覺寬高 (考慮旋轉)
-    const isRotated90 = rotation === 90 || rotation === 270;
+    // 計算視覺寬高 (真旋轉後寬高已經同步)
     const canvasWidth = pdfCanvasRef.current?.width || 0;
     const canvasHeight = pdfCanvasRef.current?.height || 0;
-    const visualWidth = isRotated90 ? canvasHeight : canvasWidth;
-    const visualHeight = isRotated90 ? canvasWidth : canvasHeight;
+    const visualWidth = canvasWidth;
+    const visualHeight = canvasHeight;
 
     return (
         <div
@@ -521,35 +505,26 @@ export const PDFViewer: React.FC = () => {
                             width: visualWidth,
                             height: visualHeight,
                             position: 'relative',
-                            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                            boxShadow: 'var(--shadow-xl)',
+                            background: 'white',
                         }}
                     >
                         <div
                             className="page-container"
                             style={{
-                                position: 'absolute',
-                                boxShadow: 'var(--shadow-xl)',
-                                background: 'white',
-                                width: canvasWidth,
-                                height: canvasHeight,
-                                transformOrigin: 'top left',
-                                // 修正旋轉後的平移量，確保 Top-Left 座標系正確旋轉
-                                transform: `rotate(${rotation}deg) translate(${rotation === 90 ? '0, -100%' :
-                                    rotation === 180 ? '-100%, -100%' :
-                                        rotation === 270 ? '-100%, 0' : '0, 0'
-                                    })`,
-                                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                position: 'relative',
+                                width: '100%',
+                                height: '100%',
                             }}
                         >
-                            {/* PDF 渲染層 (固定 0 度) */}
+                            {/* PDF 渲染層 (真旋轉由 PDF.js 處理) */}
                             <canvas
-                                key={`${currentPage}-${scale}`}
+                                key={`${currentPage}-${scale}-${pageRotation}`}
                                 ref={pdfCanvasRef}
                                 style={{
                                     display: 'block',
-                                    maxWidth: 'unset',
-                                    width: 'auto',
-                                    height: 'auto'
+                                    width: '100%',
+                                    height: '100%'
                                 }}
                             />
 
@@ -570,14 +545,14 @@ export const PDFViewer: React.FC = () => {
                                 }}
                             />
 
-                            {/* 原生文字偵測層 */}
+                            {/* 原生文字偵測層 (移至最上層以利選取) */}
                             <div style={{
                                 position: 'absolute',
                                 top: 0,
                                 left: 0,
                                 width: '100%',
                                 height: '100%',
-                                zIndex: 20,
+                                zIndex: 60,
                                 pointerEvents: 'none'
                             }}>
                                 <NativeTextLayer
@@ -647,118 +622,6 @@ export const PDFViewer: React.FC = () => {
                 style={{ display: 'none' }}
             />
 
-            <button
-                onClick={() => {
-                    if (containerRef.current) {
-                        const scrollX = (containerRef.current.scrollWidth - containerRef.current.clientWidth) / 2;
-                        containerRef.current.scrollTo({
-                            top: 0,
-                            left: scrollX,
-                            behavior: 'smooth'
-                        });
-                    }
-                }}
-                title="回到中心"
-                style={{
-                    position: 'fixed',
-                    bottom: '40px',
-                    right: '40px',
-                    width: '48px',
-                    height: '48px',
-                    background: 'var(--color-primary)',
-                    color: 'white',
-                    borderRadius: '50%',
-                    boxShadow: 'var(--shadow-xl)',
-                    zIndex: 100,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
-                onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-            >
-                <Maximize size={24} />
-            </button>
-
-            <button
-                onClick={async () => {
-                    if (!pdfDocument || !pages[0]) return;
-
-                    try {
-                        setLoading(true);
-                        const { pdfFile } = useEditorStore.getState();
-                        if (!pdfFile) return;
-
-                        let currentBytes: Uint8Array | ArrayBuffer = await pdfFile.arrayBuffer();
-                        const nativeEdits = annotations.filter(a => a.type === 'text' && a.data.isNativeEdit);
-
-                        if (nativeEdits.length > 0) {
-                            const editsByPage = new Map<number, any[]>();
-                            for (const edit of nativeEdits) {
-                                const pageInfo = pages.find(p => p.id === edit.pageId);
-                                if (!pageInfo || pageInfo.type !== 'original' || pageInfo.originalIndex === undefined) continue;
-                                const pageIndex = pageInfo.originalIndex - 1;
-                                if (!editsByPage.has(pageIndex)) editsByPage.set(pageIndex, []);
-                                editsByPage.get(pageIndex)?.push({
-                                    text: edit.data.text,
-                                    originalText: '',
-                                    x: edit.data.x,
-                                    y: edit.data.y,
-                                    width: edit.data.width,
-                                    height: edit.data.height || edit.data.fontSize,
-                                    fontSize: edit.data.fontSize,
-                                    fontFamily: edit.data.fontFamily,
-                                    color: edit.data.color
-                                });
-                            }
-                            const { modifyPageText } = await import('../../lib/pdf-editor');
-                            for (const [pageIndex, mods] of editsByPage.entries()) {
-                                const pageInfo = pages.find(p => p.type === 'original' && p.originalIndex === pageIndex + 1);
-                                currentBytes = await modifyPageText(currentBytes, pageIndex, mods, pageInfo?.rotation || 0);
-                            }
-                        }
-
-                        const blob = new Blob([currentBytes as any], { type: 'application/pdf' });
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = `edited_${Date.now()}.pdf`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        URL.revokeObjectURL(url);
-                    } catch (e: any) {
-                        console.error('Save failed:', e);
-                        setError(e.message || '儲存失敗');
-                    } finally {
-                        setLoading(false);
-                    }
-                }}
-                title="儲存並下載"
-                style={{
-                    position: 'fixed',
-                    bottom: '40px',
-                    right: '100px',
-                    width: '48px',
-                    height: '48px',
-                    background: '#10b981',
-                    color: 'white',
-                    borderRadius: '50%',
-                    boxShadow: 'var(--shadow-xl)',
-                    zIndex: 100,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.1)')}
-                onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-            >
-                <Save size={24} />
-            </button>
         </div>
     );
 };

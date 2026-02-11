@@ -218,15 +218,23 @@ export class PDFRenderer {
     /**
      * 取得頁面文字內容並轉換為 NativeTextItem 陣列
      */
-    async getPageTextContent(pageNumber: number): Promise<any[]> {
+    async getPageTextContent(pageNumber: number, rotation: number = 0): Promise<any[]> {
         try {
             const page = await this.getPage(pageNumber);
-            // 關鍵修正：永遠使用 rotation 0 取得原始座標
-            const viewport = page.getViewport({ scale: 1.0, rotation: 0 });
+            // 使用傳入的旋轉角度取得 viewport
+            const viewport = page.getViewport({ scale: 1.0, rotation });
             const textContent = await page.getTextContent();
 
             return textContent.items.map((item: any, index: number) => {
                 const [a, b, , , e, f] = item.transform;
+
+                // 處理 PDF.js 的 transform 矩陣
+                // PDF.js 提供的 transform 是相對於原始未旋轉頁面的 (0 rotation)
+                // 我們需要將其點 (e, f) 轉換到旋轉後的座標
+                const transformed = pdfjsLib.Util.transform(viewport.transform, [e, f]);
+                const tx = transformed[0];
+                const ty = transformed[1];
+
                 const fontSize = Math.sqrt(a * a + b * b);
                 const height = (item.height && item.height > 0) ? item.height : fontSize;
 
@@ -235,9 +243,9 @@ export class PDFRenderer {
                     text: item.str,
                     width: item.width,
                     height: height,
-                    x: e,
-                    // 使用 ViewBox 計算相對於左上角的 Y 座標 (PDF 為左下角)
-                    y: viewport.viewBox[3] - f - height,
+                    x: tx,
+                    // pdfjsLib.Util.transform 之後的 ty 是相對於 viewport 左上角的
+                    y: ty - height,
                     fontSize: fontSize,
                     fontFamily: item.fontName,
                     transform: item.transform

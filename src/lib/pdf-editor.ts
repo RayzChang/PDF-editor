@@ -32,28 +32,46 @@ export async function modifyPageText(
     // 關鍵修正：套用頁面旋轉
     page.setRotation(degrees(rotation));
 
-    const { height: pageHeight } = page.getSize();
-
     const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const timesRomanFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
     const courierFont = await pdfDoc.embedFont(StandardFonts.Courier);
 
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    const rot = rotation % 360;
+
     for (const mod of modifications) {
-        // Coordinate Conversion: CSS (Top-Left) to PDF (Bottom-Left)
-        // mod.y is the top of the text box in CSS pixels
-        // PDF Y is measured from bottom
-        const pdfY = pageHeight - mod.y - mod.height;
+        // Coordinate Mapping based on page rotation
+        let pdfX, pdfY, pdfW, pdfH;
+        if (rot === 90) {
+            pdfX = mod.y;
+            pdfY = mod.x;
+            pdfW = mod.height;
+            pdfH = mod.width;
+        } else if (rot === 180) {
+            pdfX = pageWidth - mod.x - mod.width;
+            pdfY = mod.y;
+            pdfW = mod.width;
+            pdfH = mod.height;
+        } else if (rot === 270) {
+            pdfX = pageWidth - mod.y - mod.height;
+            pdfY = pageHeight - mod.x - mod.width;
+            pdfW = mod.height;
+            pdfH = mod.width;
+        } else {
+            pdfX = mod.x;
+            pdfY = pageHeight - mod.y - mod.height;
+            pdfW = mod.width;
+            pdfH = mod.height;
+        }
 
         // 1. Redact (Visual Deletion): Draw white rectangle over original text
-        // Expand slightly to ensure coverage
-        const expandX = 1;
-        const expandY = 1;
+        const expand = 1;
 
         page.drawRectangle({
-            x: mod.x - expandX,
-            y: pdfY - expandY,
-            width: mod.width + (expandX * 2),
-            height: mod.height + (expandY * 2),
+            x: pdfX - expand,
+            y: pdfY - expand,
+            width: pdfW + (expand * 2),
+            height: pdfH + (expand * 2),
             color: rgb(1, 1, 1),
             opacity: 1,
         });
@@ -76,15 +94,9 @@ export async function modifyPageText(
         }
 
         // 4. Draw New Text
-        // Approximate baseline: PDF-lib draws at the baseline. 
-        // Our box bottom is at `pdfY`. 
-        // Standard fonts have descent. We need to shift UP from the bottom of the box.
-        // A rough heuristic for standard fonts is size * 0.2 approx for descent.
-        // However, `pdf-lib` text positioning is strictly baseline.
-        // If the box tightly wraps the text including descent, we should add descent.
         page.drawText(mod.text, {
-            x: mod.x,
-            y: pdfY + (mod.fontSize * 0.2), // Shift up from bottom of box
+            x: pdfX,
+            y: pdfY + (mod.fontSize * 0.1), // Base alignment
             size: mod.fontSize,
             font: font,
             color: color,
@@ -109,10 +121,7 @@ export class PDFEditor {
         pagesInfo: PageInfo[]
     ): Promise<PDFDocument> {
         const pages = pdfDoc.getPages();
-        // Note: Assuming uniform page size for first page check, mostly ok
         if (pages.length === 0) return pdfDoc;
-
-        const { height: firstPageHeight } = pages[0].getSize();
 
         // Embed standard font for text annotations
         const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -126,8 +135,18 @@ export class PDFEditor {
             if (pageIndex < 0 || pageIndex >= pages.length) continue;
 
             const page = pages[pageIndex];
-            const { height } = page.getSize();
+            const { width, height } = page.getSize();
+            const rotation = pageInfo.rotation || 0;
             const data = annotation.data;
+
+            // Helper to transform points from visual space to PDF space
+            const toPDF = (x: number, y: number, w: number = 0, h: number = 0) => {
+                const rot = rotation % 360;
+                if (rot === 90) return { x: y, y: x, width: h, height: w };
+                if (rot === 180) return { x: width - x - w, y: y, width: w, height: h };
+                if (rot === 270) return { x: width - y - h, y: height - x - w, width: h, height: w };
+                return { x: x, y: height - y - h, width: w, height: h };
+            };
 
             // Helper to parse hex color
             const parseColor = (hex: string) => {
@@ -139,12 +158,12 @@ export class PDFEditor {
             };
 
             if (annotation.type === 'text' && data.text) {
-                // Skip native edit text annotations as they are handled by modifyPageText mechanism
                 if (data.isNativeEdit) continue;
 
+                const pos = toPDF(data.x, data.y, 0, data.fontSize || 12);
                 page.drawText(data.text, {
-                    x: data.x,
-                    y: height - data.y - (data.height || 12), // Flip Y. data.y is top-left.
+                    x: pos.x,
+                    y: pos.y,
                     size: data.fontSize || 12,
                     font: font,
                     color: parseColor(data.color),
@@ -165,9 +184,11 @@ export class PDFEditor {
                     }
 
                     for (let i = 0; i < path.length - 1; i++) {
+                        const p1 = toPDF(path[i].x, path[i].y);
+                        const p2 = toPDF(path[i + 1].x, path[i + 1].y);
                         page.drawLine({
-                            start: { x: path[i].x, y: height - path[i].y }, // Flip Y
-                            end: { x: path[i + 1].x, y: height - path[i + 1].y },
+                            start: { x: p1.x, y: p1.y },
+                            end: { x: p2.x, y: p2.y },
                             thickness: thickness,
                             color: pathColor,
                             opacity: opacity,
@@ -178,27 +199,25 @@ export class PDFEditor {
                 const borderColor = parseColor(data.borderColor);
                 const fillColor = data.fillColor !== 'transparent' ? parseColor(data.fillColor) : undefined;
                 const borderWidth = data.borderWidth || 2;
-                const rectX = data.x;
-                const rectY = height - data.y - data.height; // Flip Y for rectangle (bottom-left corner)
+                const pos = toPDF(data.x, data.y, data.width, data.height);
 
                 if (data.shapeType === 'rectangle') {
                     page.drawRectangle({
-                        x: rectX,
-                        y: rectY,
-                        width: data.width,
-                        height: data.height,
+                        x: pos.x,
+                        y: pos.y,
+                        width: pos.width,
+                        height: pos.height,
                         borderColor: borderColor,
                         borderWidth: borderWidth,
                         color: fillColor,
                         opacity: fillColor ? 1 : 0,
                     });
                 } else if (data.shapeType === 'circle') {
-                    // const radius = Math.min(data.width, data.height) / 2;
                     page.drawEllipse({
-                        x: rectX + data.width / 2, // Center X
-                        y: rectY + data.height / 2, // Center Y
-                        xScale: data.width / 2,
-                        yScale: data.height / 2,
+                        x: pos.x + pos.width / 2,
+                        y: pos.y + pos.height / 2,
+                        xScale: pos.width / 2,
+                        yScale: pos.height / 2,
                         borderColor: borderColor,
                         borderWidth: borderWidth,
                         color: fillColor,
@@ -215,11 +234,12 @@ export class PDFEditor {
                     }
 
                     if (image) {
+                        const pos = toPDF(data.x, data.y, data.width, data.height);
                         page.drawImage(image, {
-                            x: data.x,
-                            y: height - data.y - data.height, // Flip Y
-                            width: data.width,
-                            height: data.height,
+                            x: pos.x,
+                            y: pos.y,
+                            width: pos.width,
+                            height: pos.height,
                         });
                     }
                 } catch (e) {
@@ -228,7 +248,7 @@ export class PDFEditor {
             }
         }
 
-        // 確保每一頁都套用正確的旋轉角度 (針對 Annotation 套用)
+        // Apply page rotations
         for (const info of pagesInfo) {
             if (info.type === 'original' && info.originalIndex !== undefined) {
                 const p = pages[info.originalIndex - 1];

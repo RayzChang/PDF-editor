@@ -4,13 +4,12 @@ import type { Annotation } from '../store/editor-store';
 
 export const useSelectTool = (
     interactionLayerRef: React.RefObject<HTMLDivElement | null>,
-    rotation: number,
     onTextClick: (annotationId: string) => void
 ) => {
-    const { activeTool, annotations, currentPage, pages, updateAnnotation, scale } = useEditorStore();
-    const currentPageId = pages[currentPage - 1]?.id;
+    const { activeTool, annotations, currentPage, pages, updateAnnotation, selectAnnotation, selectedAnnotation, scale } = useEditorStore();
+    const currentPageInfo = pages[currentPage - 1];
+    const currentPageId = currentPageInfo?.id;
     const [isDragging, setIsDragging] = useState(false);
-    const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
     const [activeHandle, setActiveHandle] = useState<string | null>(null); // 'nw', 'ne', 'sw', 'se'
     const dragStart = useRef({ x: 0, y: 0 });
     const annotationStart = useRef<{ x: number; y: number; width: number; height: number; points?: { x: number; y: number }[] }>({ x: 0, y: 0, width: 0, height: 0 });
@@ -24,23 +23,12 @@ export const useSelectTool = (
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            const cx = rect.width / 2;
-            const cy = rect.height / 2;
-            const rad = -rotation * (Math.PI / 180);
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-
-            const dx = x - cx;
-            const dy = y - cy;
-            const rx = dx * cos - dy * sin;
-            const ry = dx * sin + dy * cos;
-
             return {
-                x: (rx + cx) / scale,
-                y: (ry + cy) / scale
+                x: x / scale,
+                y: y / scale
             };
         },
-        [interactionLayerRef, rotation, scale]
+        [interactionLayerRef, scale]
     );
 
     const findAnnotationAtPoint = useCallback(
@@ -168,7 +156,7 @@ export const useSelectTool = (
                     return;
                 }
 
-                setSelectedAnnotation(annotation.id);
+                selectAnnotation(annotation.id);
                 setActiveHandle(null);
                 setIsDragging(true);
                 dragStart.current = { x, y };
@@ -181,7 +169,7 @@ export const useSelectTool = (
                 };
                 e.preventDefault();
             } else {
-                setSelectedAnnotation(null);
+                selectAnnotation(null);
                 setActiveHandle(null);
             }
         },

@@ -6,7 +6,6 @@ export const useEditorTools = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
     pdfCanvasRef: React.RefObject<HTMLCanvasElement | null>,
     interactionLayerRef: React.RefObject<HTMLDivElement | null>,
-    rotation: number,
     setCursorPosition: (pos: { x: number; y: number }) => void,
     imageInputRef?: React.RefObject<HTMLInputElement | null>,
     clickPos?: React.MutableRefObject<{ x: number; y: number }>
@@ -29,42 +28,24 @@ export const useEditorTools = (
     const tempAnnotation = useRef<Annotation | null>(null);
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
-    // 取得畫布座標 (支援逆旋轉)
+    // 取得畫布座標 (由 InteractionLayer 統一提供 offsetX/Y)
     const getCanvasCoordinates = useCallback(
         (e: MouseEvent | PointerEvent): { x: number; y: number; localX: number; localY: number } => {
             const layer = interactionLayerRef.current;
             if (!layer) return { x: 0, y: 0, localX: 0, localY: 0 };
 
             const rect = layer.getBoundingClientRect();
-
-            // 1. 取得相對於 InteractionLayer 的點擊座標 (已被 CSS 旋轉影響)
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            // 2. 執行逆旋轉轉回原始座標系 (以中心點旋轉)
-            const cx = rect.width / 2;
-            const cy = rect.height / 2;
-            const rad = -rotation * (Math.PI / 180);
-            const cos = Math.cos(rad);
-            const sin = Math.sin(rad);
-
-            const dx = x - cx;
-            const dy = y - cy;
-            const rx = dx * cos - dy * sin;
-            const ry = dx * sin + dy * cos;
-
-            const localX = rx + cx;
-            const localY = ry + cy;
-
-            // 3. 轉換為原始比例座標 (去除 scale)
             return {
-                x: localX / scale,
-                y: localY / scale,
-                localX, // 螢幕比例座標 (用於 Cursor Preview)
-                localY
+                x: x / scale,
+                y: y / scale,
+                localX: x,
+                localY: y
             };
         },
-        [interactionLayerRef, rotation, scale]
+        [interactionLayerRef, scale]
     );
 
     // 繪製臨時標註
