@@ -32,10 +32,10 @@ function AppContent() {
       <Toolbar />
       <ToolSettings />
 
-      <div style={{ flex: 1, display: 'flex' }}>
+      <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
         <Sidebar />
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           <PDFViewer />
 
           {/* 頁面指示器 */}

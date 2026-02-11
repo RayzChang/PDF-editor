@@ -528,6 +528,8 @@ export const PDFViewer: React.FC = () => {
                 flex: 1, // Ensure container fills available space
                 width: '100%',
                 height: '100%',
+                minWidth: 0,  // Allow shrinking
+                minHeight: 0, // Allow shrinking
                 background: '#475569',
                 overflow: 'auto', // Scroll bars appear here
                 position: 'relative',
@@ -544,6 +546,7 @@ export const PDFViewer: React.FC = () => {
                     alignItems: 'flex-start',
                     width: 'max-content', // Forces container to recognize full width
                     minHeight: '100%',
+                    minWidth: 0,  // Avoid expanding parent
                     position: 'relative'
                 }}
             >
