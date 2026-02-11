@@ -1,11 +1,13 @@
 import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
 import type { Annotation, PageInfo } from '../store/editor-store';
+import { mapToExportCoords } from '../utils/coordinate-utils';
 
 export interface TextModification {
     text: string;
     originalText: string;
     x: number;
-    y: number;
+    yTop: number; // Replaces y
+    baselineY: number; // Required
     width: number;
     height: number;
     fontSize: number;
@@ -37,32 +39,13 @@ export async function modifyPageText(
     const courierFont = await pdfDoc.embedFont(StandardFonts.Courier);
 
     const { width: pageWidth, height: pageHeight } = page.getSize();
-    const rot = rotation % 360;
 
     for (const mod of modifications) {
-        // Coordinate Mapping based on page rotation
-        let pdfX, pdfY, pdfW, pdfH;
-        if (rot === 90) {
-            pdfX = mod.y;
-            pdfY = mod.x;
-            pdfW = mod.height;
-            pdfH = mod.width;
-        } else if (rot === 180) {
-            pdfX = pageWidth - mod.x - mod.width;
-            pdfY = mod.y;
-            pdfW = mod.width;
-            pdfH = mod.height;
-        } else if (rot === 270) {
-            pdfX = pageWidth - mod.y - mod.height;
-            pdfY = pageHeight - mod.x - mod.width;
-            pdfW = mod.height;
-            pdfH = mod.width;
-        } else {
-            pdfX = mod.x;
-            pdfY = pageHeight - mod.y - mod.height;
-            pdfW = mod.width;
-            pdfH = mod.height;
-        }
+        // Use unified mapping logic
+        // Use mod.yTop for visual calculations
+        const { x: pdfX, y: pdfY, width: pdfW, height: pdfH } = mapToExportCoords(
+            mod.x, mod.yTop, mod.width, mod.height, pageWidth, pageHeight, rotation
+        );
 
         // 1. Redact (Visual Deletion): Draw white rectangle over original text
         const expand = 1;
@@ -94,9 +77,26 @@ export async function modifyPageText(
         }
 
         // 4. Draw New Text
+        // Always use baselineY for exact vertical alignment
+        const { y: pdfBaselineY } = mapToExportCoords(
+            mod.x, mod.baselineY, 0, 0, pageWidth, pageHeight, rotation
+        );
+
+        // Calculate font metrics for precise baseline alignment
+        // Formula requested: y: pdfY + descent
+        // In pdf-lib, we can derive descent by comparing height with and without descender.
+        const totalHeight = font.heightAtSize(mod.fontSize, { descender: true });
+        const ascent = font.heightAtSize(mod.fontSize, { descender: false });
+        const descent = ascent - totalHeight; // descent is negative
+
+        // Improve Masking (Redaction)
+        // We drew a rectangle at 'pdfY' (mapped from yTop). 
+        // We can double check if we want to use font metrics to define the mask height more robustly.
+        // But mod.height (from original bounding box) is usually safe for "covering original".
+
         page.drawText(mod.text, {
             x: pdfX,
-            y: pdfY + (mod.fontSize * 0.1), // Base alignment
+            y: pdfBaselineY + descent,
             size: mod.fontSize,
             font: font,
             color: color,
@@ -139,13 +139,9 @@ export class PDFEditor {
             const rotation = pageInfo.rotation || 0;
             const data = annotation.data;
 
-            // Helper to transform points from visual space to PDF space
+            // Helper to transform points from visual space to PDF space using unified logic
             const toPDF = (x: number, y: number, w: number = 0, h: number = 0) => {
-                const rot = rotation % 360;
-                if (rot === 90) return { x: y, y: x, width: h, height: w };
-                if (rot === 180) return { x: width - x - w, y: y, width: w, height: h };
-                if (rot === 270) return { x: width - y - h, y: height - x - w, width: h, height: w };
-                return { x: x, y: height - y - h, width: w, height: h };
+                return mapToExportCoords(x, y, w, h, width, height, rotation);
             };
 
             // Helper to parse hex color

@@ -46,8 +46,10 @@ export interface NativeTextItem {
     text: string;
     width: number;
     height: number;
-    x: number;
-    y: number;
+    x: number; // PDF space x
+    y: number; // PDF space y (Top-Left origin in UI, but originates from PDF baseline)
+    yTop: number; // PDF space y (Top-Left origin)
+    baselineY: number; // Explicit baseline (Top-Left origin distance)
     fontSize: number;
     fontFamily: string;
     fontStyle?: 'normal' | 'italic';

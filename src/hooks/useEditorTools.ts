@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore } from '../store/editor-store';
-import type { Annotation } from '../store/editor-store';
+import { useEditorStore, type Annotation } from '../store/editor-store';
+import { convertMouseToPdfCoords } from '../utils/coordinate-utils';
 
 export const useEditorTools = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -35,17 +35,17 @@ export const useEditorTools = (
             if (!layer) return { x: 0, y: 0, localX: 0, localY: 0 };
 
             const rect = layer.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const rotation = pages[currentPage - 1]?.rotation || 0;
+            const pdfPoint = convertMouseToPdfCoords(e.clientX, e.clientY, rect, scale, rotation);
 
             return {
-                x: x / scale,
-                y: y / scale,
-                localX: x,
-                localY: y
+                x: pdfPoint.x,
+                y: pdfPoint.y,
+                localX: e.clientX - rect.left,
+                localY: e.clientY - rect.top
             };
         },
-        [interactionLayerRef, scale]
+        [interactionLayerRef, scale, pages, currentPage]
     );
 
     // 繪製臨時標註

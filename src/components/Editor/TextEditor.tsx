@@ -1,19 +1,18 @@
 
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Bold, Italic, Type, Palette, X, Check, Trash2 } from 'lucide-react';
+import { Bold, X, Check } from 'lucide-react';
 
 export const TextEditor: React.FC<{
     annotation: any;
     scale: number;
     onUpdate: (data: { text: string; fontSize?: number; color?: string; fontWeight?: string; fontStyle?: string }) => void;
     onClose: () => void;
-    onDelete?: () => void;
-}> = ({ annotation, scale, onUpdate, onClose, onDelete }) => {
+}> = ({ annotation, scale, onUpdate, onClose }) => {
     const [text, setText] = useState(annotation.data.text || '');
     const [fontSize, setFontSize] = useState(annotation.data.fontSize || 16);
     const [color, setColor] = useState(annotation.data.color || '#000000');
     const [fontWeight, setFontWeight] = useState(annotation.data.fontWeight || 'normal');
-    const [fontStyle, setFontStyle] = useState(annotation.data.fontStyle || 'normal');
+    const fontStyle = annotation.data.fontStyle || 'normal';
 
     // UI State
     const [showColorPicker, setShowColorPicker] = useState(false);
@@ -114,13 +113,7 @@ export const TextEditor: React.FC<{
                 >
                     <Bold size={14} />
                 </button>
-                {/* <button 
-                    onClick={() => setFontStyle(fontStyle === 'italic' ? 'normal' : 'italic')}
-                    className={`p-1 rounded ${fontStyle === 'italic' ? 'bg-blue-600' : 'hover:bg-gray-700'}`}
-                    title="斜體"
-                >
-                    <Italic size={14} />
-                </button> */}
+
 
                 <div style={{ width: '1px', height: '16px', background: '#4a5568', margin: '0 4px' }} />
 
@@ -178,16 +171,7 @@ export const TextEditor: React.FC<{
 
                 <div style={{ width: '1px', height: '16px', background: '#4a5568', margin: '0 4px' }} />
 
-                {/* Delete Button */}
-                {/* <button 
-                    onClick={onDelete}
-                    className="p-1 hover:bg-red-600 rounded text-red-400 hover:text-white"
-                    title="刪除"
-                >
-                    <Trash2 size={14} />
-                </button>
 
-                <div style={{ width: '1px', height: '16px', background: '#4a5568', margin: '0 4px' }} /> */}
 
                 {/* Close / Save Actions */}
                 <button

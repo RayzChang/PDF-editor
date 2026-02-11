@@ -34,6 +34,7 @@ export const PDFViewer: React.FC = () => {
 
     // 文字編輯狀態
     const [editingTextId, setEditingTextId] = useState<string | null>(null);
+    const [currentViewport, setCurrentViewport] = useState<any>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const clickPos = useRef({ x: 0, y: 0 });
     const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -71,12 +72,16 @@ export const PDFViewer: React.FC = () => {
             } else {
                 // 1. 渲染本頁 PDF 到 Canvas，傳入當前頁的 true rotation
                 const pageNum = currentPageInfo?.originalIndex || 1;
-                await pdfRenderer.renderPage(
+                const viewport = await pdfRenderer.renderPage(
                     pageNum,
                     pdfCanvasRef.current,
                     scale,
                     pageRotation
                 );
+
+                if (viewport) {
+                    setCurrentViewport(viewport);
+                }
 
                 // 2. 提取原生文字物件，同樣傳入當前頁旋轉，確保座標對齊
                 const nativeItems = await pdfRenderer.getPageTextContent(pageNum, pageRotation);
@@ -96,7 +101,7 @@ export const PDFViewer: React.FC = () => {
                 renderAnnotations();
 
                 // --- VERIFICATION LOG START ---
-                if (pdfCanvasRef.current && containerRef.current) {
+                if (import.meta.env.DEV && pdfCanvasRef.current && containerRef.current) {
                     console.log('[VERIFY]',
                         'scale=', scale,
                         'rotation=', pageRotation,
@@ -319,9 +324,16 @@ export const PDFViewer: React.FC = () => {
 
                     // 文字特殊處理寬高
                     if (ann.type === 'text') {
-                        const fontSize = data.fontSize || 16;
-                        w = (data.text?.length || 0) * fontSize * 0.6; // Rough estimate
-                        h = fontSize * 1.2; // Rough estimate with line height
+                        // 如果是原生編輯，data.width / height 已經是準確的 PDF 寬高
+                        // 如果是新加的文字，才需要估算
+                        if (data.isNativeEdit) {
+                            w = data.width;
+                            h = data.height;
+                        } else {
+                            const fontSize = data.fontSize || 16;
+                            w = (data.text?.length || 0) * fontSize * 0.6; // Rough estimate
+                            h = fontSize * 1.2; // Rough estimate with line height
+                        }
                     }
                 }
 
@@ -329,10 +341,14 @@ export const PDFViewer: React.FC = () => {
                 ctx.setLineDash([5, 5]);
                 ctx.strokeStyle = '#3b82f6';
                 ctx.lineWidth = 1;
+                // 確保寬高不為 0，避免畫不出框
+                if (w < 10) w = 10;
+                if (h < 10) h = 10;
+
                 ctx.strokeRect(x * scale - 5, y * scale - 5, w * scale + 10, h * scale + 10);
                 ctx.setLineDash([]);
 
-                // 繪製縮放拉柄 (僅圖片和形狀)
+                // 繪製縮放拉柄 (文字暫不支援 Resize，僅圖片和形狀)
                 if (ann.type === 'image' || ann.type === 'shape') {
                     ctx.fillStyle = '#3b82f6';
                     const hSize = 8;
@@ -386,8 +402,10 @@ export const PDFViewer: React.FC = () => {
             data: {
                 text: item.text,
                 x: item.x,
-                y: item.y,
+                y: item.yTop, // Use yTop for UI positioning
+                baselineY: item.baselineY, // Store baselineY for export
                 width: item.width,
+                height: item.height, // Ensure height is passed
                 fontSize: item.fontSize,
                 color: '#000000',
                 fontFamily: 'Arial',
@@ -517,22 +535,25 @@ export const PDFViewer: React.FC = () => {
                                 height: '100%',
                             }}
                         >
-                            {/* PDF 渲染層 (真旋轉由 PDF.js 處理) */}
+                            {/* 1. PDF 渲染層 (zIndex: 10) */}
                             <canvas
                                 key={`${currentPage}-${scale}-${pageRotation}`}
                                 ref={pdfCanvasRef}
                                 style={{
                                     display: 'block',
                                     width: '100%',
-                                    height: '100%'
+                                    height: '100%',
+                                    position: 'relative',
+                                    zIndex: 10
                                 }}
                             />
 
-                            {/* 標註畫布層 */}
-                            <canvas
-                                ref={annotationCanvasRef}
-                                onMouseMove={() => {
-                                    // 游標位置暫不追蹤
+                            {/* 2. 標註畫布與互動層 (zIndex: 40) */}
+                            <div
+                                ref={interactionLayerRef}
+                                className="interaction-layer"
+                                onMouseDown={() => {
+                                    if (import.meta.env.DEV) console.log('ANNOTATION_CLICK');
                                 }}
                                 onMouseEnter={() => setIsHoveringCanvas(true)}
                                 onMouseLeave={() => setIsHoveringCanvas(false)}
@@ -540,12 +561,29 @@ export const PDFViewer: React.FC = () => {
                                     position: 'absolute',
                                     top: 0,
                                     left: 0,
-                                    zIndex: 10,
-                                    pointerEvents: 'none',
+                                    width: '100%',
+                                    height: '100%',
+                                    zIndex: 40,
+                                    cursor: activeTool === 'hand' ? 'grab' : (activeTool === 'select' ? 'default' : 'crosshair'),
+                                    // 確保 Select/Draw 等工具都能接收事件
+                                    pointerEvents: activeTool !== 'hand' ? 'auto' : 'none'
                                 }}
-                            />
+                            >
+                                <canvas
+                                    ref={annotationCanvasRef}
+                                    style={{
+                                        position: 'absolute',
+                                        top: 0,
+                                        left: 0,
+                                        width: '100%',
+                                        height: '100%',
+                                        zIndex: 1, // Within parent 40
+                                        pointerEvents: 'none',
+                                    }}
+                                />
+                            </div>
 
-                            {/* 原生文字偵測層 (移至最上層以利選取) */}
+                            {/* 3. 原生文字偵測與編輯層 (zIndex: 60) */}
                             <div style={{
                                 position: 'absolute',
                                 top: 0,
@@ -553,31 +591,18 @@ export const PDFViewer: React.FC = () => {
                                 width: '100%',
                                 height: '100%',
                                 zIndex: 60,
+                                // 強制設為 none，避免攔截事件
                                 pointerEvents: 'none'
                             }}>
                                 <NativeTextLayer
                                     scale={scale}
+                                    rotation={pageRotation}
+                                    viewport={currentViewport}
                                     onTextClick={handleNativeTextClick}
                                 />
                             </div>
 
-                            {/* 統一事件接收層 (最上層) */}
-                            <div
-                                ref={interactionLayerRef}
-                                className="interaction-layer"
-                                style={{
-                                    position: 'absolute',
-                                    top: 0,
-                                    left: 0,
-                                    width: '100%',
-                                    height: '100%',
-                                    zIndex: 50,
-                                    cursor: activeTool === 'hand' ? 'grab' : 'crosshair',
-                                    pointerEvents: activeTool === 'hand' ? 'none' : 'auto'
-                                }}
-                            />
-
-                            {/* 游標預覽器 (Cursor Preview) */}
+                            {/* 游標預覽器 (Cursor Preview, zIndex: 70) */}
                             {isHoveringCanvas && activeTool !== 'select' && activeTool !== 'hand' && (
                                 <div
                                     style={{
@@ -590,7 +615,7 @@ export const PDFViewer: React.FC = () => {
                                         border: '1px solid #3b82f6',
                                         backgroundColor: activeTool === 'eraser' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(59, 130, 246, 0.2)',
                                         pointerEvents: 'none',
-                                        zIndex: 60,
+                                        zIndex: 70,
                                         transform: `translate(-50%, -50%) translate(${cursorPosition.x}px, ${cursorPosition.y}px)`,
                                         boxShadow: '0 0 4px rgba(0,0,0,0.2)'
                                     }}
@@ -614,6 +639,37 @@ export const PDFViewer: React.FC = () => {
                     </div>
                 )}
             </div>
+
+
+            {/* Debug Overlay (Fixed at top-right, high z-index) - Only in DEV */}
+            {import.meta.env.DEV && (
+                <div style={{
+                    position: 'fixed',
+                    top: '80px',
+                    right: '20px',
+                    zIndex: 999999,
+                    background: 'rgba(0,0,0,0.85)',
+                    color: '#00ff00',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    pointerEvents: 'none',
+                    boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
+                    border: '1px solid #444',
+                    minWidth: '200px'
+                }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '8px', borderBottom: '1px solid #444', paddingBottom: '4px' }}>ENGINE MONITOR</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Mouse Raw:</span> <span style={{ color: 'white' }}>{cursorPosition.x.toFixed(0)}, {cursorPosition.y.toFixed(0)}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Mouse PDF:</span> <span style={{ color: '#00ff00' }}>{(cursorPosition.x / scale).toFixed(0)}, {(cursorPosition.y / scale).toFixed(0)}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Rotation:</span> <span style={{ color: 'white' }}>{pageRotation}°</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Scale:</span> <span style={{ color: 'white' }}>{scale.toFixed(2)}x</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tool:</span> <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>{activeTool.toUpperCase()}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', paddingTop: '4px', borderTop: '1px dotted #444' }}>
+                        <span>NativeItems:</span> <span style={{ color: 'white' }}>{useEditorStore.getState().nativeTextItems.length}</span>
+                    </div>
+                </div>
+            )}
 
             <input
                 ref={imageInputRef}

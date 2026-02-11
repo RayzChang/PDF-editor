@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
-import { useEditorStore } from '../store/editor-store';
-import type { Annotation } from '../store/editor-store';
+import { useEditorStore, type Annotation } from '../store/editor-store';
+import { convertMouseToPdfCoords } from '../utils/coordinate-utils';
 
 export const useSelectTool = (
     interactionLayerRef: React.RefObject<HTMLDivElement | null>,
@@ -12,7 +12,14 @@ export const useSelectTool = (
     const [isDragging, setIsDragging] = useState(false);
     const [activeHandle, setActiveHandle] = useState<string | null>(null); // 'nw', 'ne', 'sw', 'se'
     const dragStart = useRef({ x: 0, y: 0 });
-    const annotationStart = useRef<{ x: number; y: number; width: number; height: number; points?: { x: number; y: number }[] }>({ x: 0, y: 0, width: 0, height: 0 });
+    const annotationStart = useRef<{
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        points?: { x: number; y: number }[];
+        baselineY?: number; // Added
+    }>({ x: 0, y: 0, width: 0, height: 0 });
 
     const getCanvasCoordinates = useCallback(
         (e: MouseEvent | PointerEvent): { x: number; y: number } => {
@@ -20,15 +27,11 @@ export const useSelectTool = (
             if (!layer) return { x: 0, y: 0 };
 
             const rect = layer.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const rotation = pages[currentPage - 1]?.rotation || 0;
 
-            return {
-                x: x / scale,
-                y: y / scale
-            };
+            return convertMouseToPdfCoords(e.clientX, e.clientY, rect, scale, rotation);
         },
-        [interactionLayerRef, scale]
+        [interactionLayerRef, scale, pages, currentPage]
     );
 
     const findAnnotationAtPoint = useCallback(
@@ -43,17 +46,17 @@ export const useSelectTool = (
                 switch (ann.type) {
                     case 'text':
                         // 文字: 檢查點擊區域
-                        const fontSize = data.fontSize || 16;
-                        const textWidth = (data.text?.length || 0) * fontSize * 0.6;
-                        const textHeight = fontSize;
+                        // 文字: 檢查點擊區域 (優先使用 data.width/height)
+                        const w = data.width || ((data.text?.length || 0) * (data.fontSize || 16) * 0.6);
+                        const h = data.height || (data.fontSize || 16);
 
-                        const padding = 10; // 增加點擊緩衝
+                        const padding = 5; // 增加點擊緩衝
 
                         if (
-                            x >= data.x - padding &&
-                            x <= data.x + textWidth + padding &&
-                            y >= data.y - padding &&
-                            y <= data.y + textHeight + padding
+                            x >= (data.x || 0) - padding &&
+                            x <= (data.x || 0) + w + padding &&
+                            y >= (data.y || 0) - padding && // data.y is top-left
+                            y <= (data.y || 0) + h + padding
                         ) {
                             return ann;
                         }
@@ -165,7 +168,8 @@ export const useSelectTool = (
                     y: annotation.data.y || 0,
                     width: annotation.data.width || 0,
                     height: annotation.data.height || 0,
-                    points: annotation.data.points ? JSON.parse(JSON.stringify(annotation.data.points)) : undefined
+                    points: annotation.data.points ? JSON.parse(JSON.stringify(annotation.data.points)) : undefined,
+                    baselineY: annotation.data.baselineY // Store baselineY
                 };
                 e.preventDefault();
             } else {
@@ -223,6 +227,15 @@ export const useSelectTool = (
                     case 'shape':
                         newData.x = annotationStart.current.x + dx;
                         newData.y = annotationStart.current.y + dy;
+                        newData.x = annotationStart.current.x + dx;
+                        newData.y = annotationStart.current.y + dy;
+
+                        // Update baselineY if it exists (for native text)
+                        if (annotationStart.current.baselineY !== undefined) {
+                            // dx, dy are in PDF space (because convertMouseToPdfCoords uses unscaledX/Y)
+                            // So we just add dy directly.
+                            newData.baselineY = annotationStart.current.baselineY + dy;
+                        }
                         break;
 
                     case 'draw':
@@ -256,7 +269,8 @@ export const useSelectTool = (
                         y: annotation.data.y || 0,
                         width: annotation.data.width || 0,
                         height: annotation.data.height || 0,
-                        points: annotation.data.points ? JSON.parse(JSON.stringify(annotation.data.points)) : undefined
+                        points: annotation.data.points ? JSON.parse(JSON.stringify(annotation.data.points)) : undefined,
+                        baselineY: annotation.data.baselineY
                     };
                 }
             }

@@ -1,8 +1,10 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { useEditorStore, type NativeTextItem } from '../../store/editor-store';
 
 interface NativeTextLayerProps {
     scale: number;
+    rotation: number; // Added for dependency stability
+    viewport: any; // PDF.js viewport object
     onTextClick: (item: NativeTextItem) => void;
 }
 
@@ -11,17 +13,24 @@ interface TextGroup {
     items: NativeTextItem[];
     x: number;
     y: number;
+    yTop: number; // Added
     width: number;
     height: number;
     text: string;
     fontSize: number;
     fontFamily: string;
+    baselineY: number; // Added
 }
 
-export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextClick }) => {
+export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, rotation, viewport, onTextClick }) => {
     const { nativeTextItems, activeTool } = useEditorStore();
     const [editingId, setEditingId] = useState<string | null>(null);
     const editorRef = useRef<HTMLDivElement>(null);
+
+    // Insurance log for mounting/updates
+    useEffect(() => {
+        console.log('NativeTextLayer mounted/updated', nativeTextItems.length);
+    }, [nativeTextItems]);
 
     // Group text items into lines/paragraphs
     const textGroups = useMemo(() => {
@@ -45,11 +54,13 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
                     items: [item],
                     x: item.x,
                     y: item.y,
+                    yTop: item.yTop,
                     width: item.width,
                     height: item.height,
                     text: item.text,
                     fontSize: item.fontSize,
-                    fontFamily: item.fontFamily
+                    fontFamily: item.fontFamily,
+                    baselineY: item.baselineY // Use calculated baselineY
                 };
             } else {
                 // Check if belongs to same line:
@@ -76,11 +87,13 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
                         items: [item],
                         x: item.x,
                         y: item.y,
+                        yTop: item.yTop,
                         width: item.width,
                         height: item.height,
                         text: item.text,
                         fontSize: item.fontSize,
-                        fontFamily: item.fontFamily
+                        fontFamily: item.fontFamily,
+                        baselineY: item.baselineY
                     };
                 }
             }
@@ -91,7 +104,25 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
         }
 
         return groups;
-    }, [nativeTextItems]);
+    }, [nativeTextItems, scale, rotation]); // Added scale and rotation to avoid cache issues in production
+
+    // Focus handler
+    useEffect(() => {
+        if (editingId) {
+            requestAnimationFrame(() => {
+                editorRef.current?.focus();
+            });
+        }
+    }, [editingId]);
+
+    // Debug update (Only in DEV)
+    useEffect(() => {
+        if (!import.meta.env.DEV) return;
+        const debugEl = document.getElementById('debug-text-groups');
+        if (debugEl) {
+            debugEl.innerText = `Groups: ${textGroups.length}`;
+        }
+    }, [textGroups.length]);
 
     const handleBlur = () => {
         if (editingId && editorRef.current) {
@@ -99,26 +130,14 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
             const group = textGroups.find(g => g.id === editingId);
 
             if (group && newText !== group.text) {
-                // Create a text annotation that represents the "Native Edit"
-                // Ideally this triggers the PDF modification logic we planned.
-                // For now, we reuse the "addAnnotation" flow but with 'isNativeEdit' flag
-                // which our PDFViewer handles by calling modifyPageText logic.
-
-                // We need to pass the "Union Rect" of the original items to be redacted.
-                // We can synthesize a "NativeTextItem" like structure.
-
-                // Trigger the flow via onTextClick logic which adds annotation
-                // Or call addAnnotation directly.
-                // onTextClick in PDFViewer creates the annotation.
-                // But onTextClick expects a NativeTextItem.
-                // Let's adapt it.
-
                 onTextClick({
                     ...group.items[0], // Base props
                     id: group.id,
                     text: newText, // New Text!
                     x: group.x,
-                    y: group.y,
+                    y: group.y, // Keep original y for reference if needed, but we rely on yTop/baselineY
+                    yTop: group.yTop,
+                    baselineY: group.baselineY,
                     width: group.width,
                     height: group.height
                 });
@@ -127,42 +146,64 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
         }
     };
 
-    if (activeTool !== 'text' && activeTool !== 'select') return null;
+    const isTextMode = activeTool === 'text' || activeTool === 'select';
+
+    // Always render the wrapper to avoid early return issues in production states
+    // But control visibility/pointer-events based on tool state
+    const isVisible = isTextMode && nativeTextItems.length > 0;
 
     return (
         <div
             className="native-text-layer"
+            onClick={() => {
+                if (import.meta.env.DEV) console.log('ROOT_TEXT_LAYER_CLICK');
+            }}
             style={{
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 width: '100%',
                 height: '100%',
-                pointerEvents: 'none', // 容器不接收事件
+                display: isVisible ? 'block' : 'none',
+                // 容器本身強制不接收事件，避免攔截 Select/Draw
+                pointerEvents: 'none',
                 zIndex: 5,
             }}
         >
             {textGroups.map((group) => {
                 const isEditing = group.id === editingId;
 
+                // 使用 PDF.js viewport 進行精確座標轉換
+                let vx = group.x * scale;
+
+                if (viewport) {
+                    // vx is the visual x coordinate in screen space
+                    const [x] = viewport.convertToViewportPoint(group.x, group.y);
+                    vx = x;
+                }
+
+                const vScale = viewport?.scale || scale;
+
                 return (
                     <div
                         key={group.id}
                         style={{
                             position: 'absolute',
-                            left: group.x * scale,
-                            top: group.y * scale,
-                            width: 'auto', // Let it grow if editing
-                            maxWidth: isEditing ? 'none' : (group.width * scale * 1.5), // Allow some overflow
+                            left: vx,
+                            top: group.yTop * scale, // Use yTop directly!
+                            width: 'auto',
+                            maxWidth: isEditing ? 'none' : (group.width * vScale * 1.5),
                             height: 'auto',
-                            minWidth: group.width * scale,
-                            minHeight: group.height * scale,
-                            fontSize: `${group.fontSize * scale}px`,
+                            minWidth: group.width * vScale,
+                            minHeight: group.height * vScale,
+                            fontSize: `${group.fontSize * vScale}px`,
                             fontFamily: group.fontFamily || 'Arial, sans-serif',
-                            lineHeight: 1.2, // Match PDF line height approx
+                            lineHeight: 1.2,
                             cursor: 'text',
-                            pointerEvents: (activeTool === 'text' || activeTool === 'select') ? 'auto' : 'none',
-                            whiteSpace: 'pre-wrap', // Preserve spaces
+                            // 只有在編輯模式 OR Text工具模式下才允許 pointer-events: auto
+                            // Select 工具時為 none，讓事件穿透到 Canvas
+                            pointerEvents: (isEditing || activeTool === 'text') ? 'auto' : 'none',
+                            whiteSpace: 'pre-wrap',
                             zIndex: isEditing ? 100 : 1,
                         }}
                         className={`native-text-group ${isEditing ? 'editing' : ''}`}
@@ -194,13 +235,8 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, onTextC
                             <div
                                 onClick={(e) => {
                                     e.stopPropagation();
+                                    if (import.meta.env.DEV) console.log('TEXT_LAYER_CLICK', group.id, group.text.slice(0, 30));
                                     setEditingId(group.id);
-                                    // Focus needs to happen after render
-                                    setTimeout(() => {
-                                        if (editorRef.current) {
-                                            editorRef.current.focus();
-                                        }
-                                    }, 0);
                                 }}
                                 style={{
                                     color: 'transparent', // Hide text but keep selectable? 

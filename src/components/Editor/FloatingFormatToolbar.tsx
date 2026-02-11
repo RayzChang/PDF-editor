@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { NativeTextItem } from '../../store/editor-store';
-import { Bold, Italic, Underline, Type, Palette, ChevronDown } from 'lucide-react';
+import type { NativeTextItem } from '../../store/editor-store';
+import { Bold, Italic, Underline, Palette, ChevronDown } from 'lucide-react';
 
 interface FloatingFormatToolbarProps {
     targetRect: DOMRect | null;
@@ -17,7 +17,6 @@ export const FloatingFormatToolbar: React.FC<FloatingFormatToolbarProps> = ({
     targetRect,
     currentStyle,
     onStyleChange,
-    onClose
 }) => {
     const toolbarRef = useRef<HTMLDivElement>(null);
     const [colorOpen, setColorOpen] = useState(false);

@@ -8,11 +8,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     import.meta.url
 ).toString();
 
-console.log('PDF Renderer Initialized with worker:', pdfjsLib.GlobalWorkerOptions.workerSrc);
+if (import.meta.env.DEV) {
+    console.log('PDF Renderer Initialized with worker:', pdfjsLib.GlobalWorkerOptions.workerSrc);
+}
 
 interface RenderTaskInfo {
     cancel: () => void;
-    promise: Promise<void>;
+    promise: Promise<any>;
 }
 
 export class PDFRenderer {
@@ -77,7 +79,7 @@ export class PDFRenderer {
         canvas: HTMLCanvasElement,
         scale: number = 1.0,
         rotation: number = 0
-    ): Promise<void> {
+    ): Promise<any> {
         // 1. Cancel any existing render task on this canvas AND reserve the slot
         const existingTask = this.activeRenderTasks.get(canvas);
         if (existingTask) {
@@ -134,6 +136,8 @@ export class PDFRenderer {
 
                 pdfRenderTask = page.render(renderContext);
                 await pdfRenderTask.promise;
+
+                return viewport; // Return the viewport for consistent mapping elsewhere
             } catch (error: any) {
                 if (isCancelled || error.name === 'RenderingCancelledException') {
                     // Normal cancellation
@@ -144,7 +148,7 @@ export class PDFRenderer {
             } finally {
                 // If this specific task is still the active one, clear it
                 const current = this.activeRenderTasks.get(canvas);
-                if (current && current.promise === renderPromise) {
+                if (current && current.cancel === cancel) {
                     this.activeRenderTasks.delete(canvas);
                 }
             }
@@ -158,7 +162,7 @@ export class PDFRenderer {
             promise: renderPromise
         });
 
-        await renderPromise;
+        return await renderPromise;
     }
 
     /**
@@ -225,27 +229,45 @@ export class PDFRenderer {
             const viewport = page.getViewport({ scale: 1.0, rotation });
             const textContent = await page.getTextContent();
 
+            if (import.meta.env.DEV) {
+                console.log('[pdf-renderer] getPageTextContent:', {
+                    pageNumber,
+                    rotation,
+                    viewport: { width: viewport.width, height: viewport.height },
+                    itemCount: textContent.items.length
+                });
+
+                if (textContent.items.length > 0) {
+                    console.log('[pdf-renderer] first 3 items:', textContent.items.slice(0, 3).map((it: any) => ({
+                        str: it.str,
+                        transform: it.transform
+                    })));
+                }
+            }
+
             return textContent.items.map((item: any, index: number) => {
                 const [a, b, , , e, f] = item.transform;
 
-                // 處理 PDF.js 的 transform 矩陣
-                // PDF.js 提供的 transform 是相對於原始未旋轉頁面的 (0 rotation)
-                // 我們需要將其點 (e, f) 轉換到旋轉後的座標
-                const transformed = pdfjsLib.Util.transform(viewport.transform, [e, f]);
-                const tx = transformed[0];
-                const ty = transformed[1];
-
+                // Return raw PDF coordinates (unscaled, unrotated, bottom-left origin)
+                // This allows the component to use viewport.convertToViewportPoint(e, f)
                 const fontSize = Math.sqrt(a * a + b * b);
                 const height = (item.height && item.height > 0) ? item.height : fontSize;
+
+                // Calculate unified coordinates (unscaled, unrotated)
+                // viewport.viewBox[3] is the height of the media box
+                const pdfPageHeight = viewport.viewBox[3];
+                const baselineY = pdfPageHeight - f; // Distance from top to baseline
+                const yTop = baselineY - height; // Distance from top to top of text box
 
                 return {
                     id: `native-${index}`,
                     text: item.str,
                     width: item.width,
                     height: height,
-                    x: tx,
-                    // pdfjsLib.Util.transform 之後的 ty 是相對於 viewport 左上角的
-                    y: ty - height,
+                    x: e,
+                    y: f,
+                    yTop: yTop,
+                    baselineY: baselineY,
                     fontSize: fontSize,
                     fontFamily: item.fontName,
                     transform: item.transform

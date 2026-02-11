@@ -1,6 +1,5 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { NativeTextItem } from '../../store/editor-store';
-import { cn } from '../../lib/utils'; // Assuming utils exists, if not I will use clsx directly or create it
+import React, { useRef, useEffect, useCallback } from 'react';
+import type { NativeTextItem } from '../../store/editor-store';
 
 interface EditableTextBlockProps {
     item: NativeTextItem;
@@ -8,7 +7,6 @@ interface EditableTextBlockProps {
     isEditing: boolean;
     onStartEditing: () => void;
     onEndEditing: (text: string, style?: Partial<NativeTextItem>) => void;
-    onUpdateStyle: (style: Partial<NativeTextItem>) => void;
     onFocus?: (rect: DOMRect) => void;
 }
 
@@ -18,18 +16,11 @@ export const EditableTextBlock: React.FC<EditableTextBlockProps> = ({
     isEditing,
     onStartEditing,
     onEndEditing,
-    onUpdateStyle,
     onFocus
 }) => {
     const editorRef = useRef<HTMLDivElement>(null);
-    const [localText, setLocalText] = useState(item.text);
 
-    // Sync input to local state
-    const handleInput = useCallback(() => {
-        if (editorRef.current) {
-            setLocalText(editorRef.current.innerText);
-        }
-    }, []);
+
 
     // Handle blur: commit changes
     const handleBlur = useCallback(() => {
@@ -113,7 +104,6 @@ export const EditableTextBlock: React.FC<EditableTextBlockProps> = ({
                 e.stopPropagation();
                 if (!isEditing) onStartEditing();
             }}
-            onInput={handleInput}
             onBlur={handleBlur}
             onFocus={updateFocusRect}
             onKeyUp={updateFocusRect}

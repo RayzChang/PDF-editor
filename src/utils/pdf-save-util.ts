@@ -28,7 +28,7 @@ export class PDFSaveUtil {
             if (pageInfo.type !== 'original') continue;
 
             const pdfPage = pages[pageInfo.originalIndex - 1];
-            const { width, height } = pdfPage.getSize();
+            const { height } = pdfPage.getSize();
 
             if (type === 'text') {
                 // 如果是原生文字編輯
@@ -59,7 +59,7 @@ export class PDFSaveUtil {
         }
 
         const pdfBytes = await pdfDoc.save();
-        return new Blob([pdfBytes], { type: 'application/pdf' });
+        return new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' });
     }
 }
 
