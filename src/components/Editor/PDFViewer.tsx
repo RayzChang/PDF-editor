@@ -204,49 +204,42 @@ export const PDFViewer: React.FC = () => {
                     break;
 
                 case 'text':
-                    // 繪製文字
+                    // 原字位置：白底蓋掉（與匯出一致）；新增/修改後的字：半透明紅底預覽
                     if (data.text) {
-                        // 1. Redaction: Draw white background to hide original text if it's a native edit
-                        // Use the NEW fontSize if available, otherwise fallback
                         const currentFontSize = data.fontSize || 16;
-
-                        if (data.isNativeEdit) {
-                            ctx.fillStyle = '#FFFFFF';
-                            // const w = (data.width || 0) * scale;
-                            // Check if text grew wider than original box? 
-                            // Actually, for native edit, we might want to measure the new text width!
-                            // But for now, let's stick to the rect. 
-                            // Better yet: Measure the new text width.
-                            // ctx.font needs to be set before measurement.
-                            const fontStr = `${data.fontStyle || ''} ${data.fontWeight || ''} ${currentFontSize * scale}px ${data.fontFamily || 'Arial'}`;
-                            ctx.font = fontStr;
-                            const metrics = ctx.measureText(data.text);
-                            const textWidth = metrics.width;
-
-                            // 白底要蓋住原字 + 新字，取較大寬度並多留邊距避免露出原字
-                            const boxWidth = Math.max((data.width || 0) * scale, textWidth);
-                            const h = currentFontSize * scale;
-                            const pad = 8;
+                        const textToDraw = data.text || '';
+                        const lineCount = Math.max(1, textToDraw.split(/\r?\n/).filter(Boolean).length);
+                        const fontStr = `${data.fontStyle || ''} ${data.fontWeight || ''} ${currentFontSize * scale}px ${data.fontFamily || 'Arial'}`.trim();
+                        ctx.font = fontStr;
+                        const metrics = ctx.measureText(textToDraw);
+                        const textWPage = metrics.width / scale;
+                        const textHPage = lineCount * currentFontSize * 0.88;
+                        const textHPageTight = lineCount * currentFontSize * 0.65;
+                        const PAD = 4;
+                        if (data.isNativeEdit && data.nativeEditOrigin) {
+                            const o = data.nativeEditOrigin;
+                            const ow = (o.width != null && o.width > 0) ? Math.min(o.width, textWPage) : textWPage;
+                            const oh = (o.height != null && o.height > 0) ? Math.min(o.height, textHPageTight) : textHPageTight;
+                            const oBottom = o.y + (o.height ?? oh);
+                            const rectY = oBottom - oh - PAD;
+                            ctx.fillStyle = 'rgb(255, 255, 255)';
                             ctx.fillRect(
-                                (data.x * scale) - pad,
-                                (data.y * scale) - pad,
-                                boxWidth + pad * 2,
-                                h + pad * 2
+                                (o.x - PAD) * scale,
+                                rectY * scale,
+                                (ow + PAD * 2) * scale,
+                                (oh + PAD * 2) * scale
                             );
                         }
-
-                        // 2. Draw Text
-                        const fontStr = `${data.fontStyle || ''} ${data.fontWeight || ''} ${currentFontSize * scale}px ${data.fontFamily || 'Arial'}`;
-                        ctx.font = fontStr.trim();
-                        ctx.fillStyle = data.color || '#000000';
-                        // Fix: Top baseline to match Input
-                        ctx.textBaseline = 'top';
-                        // Adjust y slightly if needed, but 'top' usually matches 'y'
-                        ctx.fillText(
-                            data.text,
-                            data.x * scale,
-                            data.y * scale
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.25)';
+                        ctx.fillRect(
+                            (data.x - PAD) * scale,
+                            (data.y - PAD) * scale,
+                            (textWPage + PAD * 2) * scale,
+                            (textHPage + PAD * 2) * scale
                         );
+                        ctx.fillStyle = data.color || '#000000';
+                        ctx.textBaseline = 'top';
+                        ctx.fillText(data.text, data.x * scale, data.y * scale);
                     }
                     break;
 

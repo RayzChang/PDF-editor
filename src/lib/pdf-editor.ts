@@ -1,7 +1,22 @@
-import { PDFDocument, rgb, StandardFonts, degrees, type PDFFont } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts, degrees, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import type { Annotation, PageInfo } from '../store/editor-store';
 import { mapToExportCoords } from '../utils/coordinate-utils';
+
+/**
+ * 清除頁面上所有註解（含表單框線／Widget），讓匯出結果與編輯器一致：
+ * 檢視器不會再「後畫」註解層，我們寫入的文字就不會被線條蓋住。
+ * 用「依索引 remove」清空 Annots，避免 pdf-lib Issue #1001：removeAnnot(ref) 常對不到 ref 導致刪不掉。
+ */
+function clearPageAnnotations(page: PDFPage): void {
+    type Leaf = { Annots(): { size(): number; remove(i: number): void } | undefined };
+    const leaf = (page as unknown as { node: Leaf }).node;
+    const annots = leaf.Annots();
+    if (!annots) return;
+    while (annots.size() > 0) {
+        annots.remove(0);
+    }
+}
 
 /** 標準 PDF 字型只支援 WinAnsi（約 Latin-1），中文等會拋錯。 */
 function needsUnicodeFont(text: string): boolean {
@@ -173,6 +188,9 @@ export class PDFEditor {
         const pages = pdfDoc.getPages();
         if (pages.length === 0) return pdfDoc;
 
+        // 匯出前清除每頁註解（表單框線等），避免檢視器後畫註解層、蓋住我們寫的字
+        for (const page of pages) clearPageAnnotations(page);
+
         const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
         let cjkFont: PDFFont | null = null;
         const needsCjk = annotations.some(
@@ -204,8 +222,10 @@ export class PDFEditor {
             (a, b) => (layerOrder[a.type] ?? 3) - (layerOrder[b.type] ?? 3)
         );
 
-        const PAD = 14; // 白底邊距
-        const MIN_LINES = 2.5; // 至少蓋 2.5 行高
+        // 與編輯器紅框完全一致：PAD 4、高度 0.88、寬度係數 0.5（貼合字體）
+        const PAD = 4;
+        const MAX_WHITE_W = 320;
+        const MAX_WHITE_H = 100;
 
         const getPageCtx = (ann: Annotation) => {
             const pageInfo = pagesInfo.find(p => p.id === ann.pageId);
@@ -249,25 +269,35 @@ export class PDFEditor {
             const fontSize = data.fontSize || 12;
             const textToDraw = data.text || '';
             const lineCount = Math.max(1, textToDraw.split(/\r?\n/).filter(Boolean).length);
-            const lineHeight = fontSize * 1.2;
-            const textW = Math.max(data.width || 0, fontSize * (textToDraw.length || 1) * 1.0);
-            const textH = Math.max(data.height || fontSize, lineCount * lineHeight, lineHeight * MIN_LINES);
+            const formulaW = fontSize * (textToDraw.length || 1) * 0.5;
+            const formulaH = lineCount * fontSize * 0.88;
+            const formulaH_Tight = lineCount * fontSize * 0.65; // 原字位置用更緊高度，不超出黑框、上半部不偏高
+            const textW = Math.min(MAX_WHITE_W, (data.width != null && data.width > 0) ? Math.min(data.width, formulaW) : formulaW);
+            const textH = Math.min(MAX_WHITE_H, (data.height != null && data.height > 0) ? Math.min(data.height, formulaH) : formulaH);
 
             const drawWhite = (x: number, y: number, w: number, h: number) => {
-                const pos = toPDF(x, y, w, h);
+                const wCap = Math.min(w, MAX_WHITE_W);
+                const hCap = Math.min(h, MAX_WHITE_H);
+                const pos = toPDF(x, y, wCap, hCap);
                 page.drawRectangle({
                     x: pos.x - PAD,
                     y: pos.y - PAD,
-                    width: (pos.width ?? w) + PAD * 2,
-                    height: (pos.height ?? h) + PAD * 2,
+                    width: (pos.width ?? wCap) + PAD * 2,
+                    height: (pos.height ?? hCap) + PAD * 2,
                     color: rgb(1, 1, 1),
                     opacity: 1,
                 });
             };
+            // 原字位置：與編輯器紅框同步，寬高用「原字」範圍（o.width / o.height），不用目前字數 formula 避免只蓋一小塊
             if (data.isNativeEdit && data.nativeEditOrigin) {
                 const o = data.nativeEditOrigin;
-                drawWhite(o.x, o.y, o.width || textW, Math.max(o.height || fontSize, lineHeight * MIN_LINES));
+                const ow = Math.min(MAX_WHITE_W, (o.width != null && o.width > 0) ? o.width : formulaW);
+                const oh = Math.min(MAX_WHITE_H, (o.height != null && o.height > 0) ? Math.min(o.height, formulaH_Tight) : formulaH_Tight);
+                const oBottom = o.y + (o.height ?? oh);
+                const rectY = oBottom - oh;
+                drawWhite(o.x, rectY, ow, oh);
             }
+            // 目前文字位置：用緊貼公式（與紅框一致），不超出表格
             drawWhite(data.x, data.y, textW, textH);
         }
 
@@ -293,6 +323,8 @@ export class PDFEditor {
                 const textFont = useCjk ? cjkFont! : font;
                 const color = parseColor(data.color);
                 const lines = safeText.split(/\r?\n/);
+                // 頁面有旋轉時，文字需同向旋轉才會在檢視時維持正常閱讀（與頁面一起轉，才不會顛倒）
+                const textRotate = rotation !== 0 ? degrees(rotation) : undefined;
                 for (let i = 0; i < lines.length; i++) {
                     if (!lines[i]) continue;
                     const linePos = toPDF(data.x, data.y + i * lineHeight, 0, fontSize);
@@ -302,6 +334,7 @@ export class PDFEditor {
                         size: fontSize,
                         font: textFont,
                         color,
+                        ...(textRotate !== undefined ? { rotate: textRotate } : {}),
                     });
                 }
             } else if (annotation.type === 'draw' || annotation.type === 'highlight' || annotation.type === 'eraser') {
@@ -396,11 +429,13 @@ export class PDFEditor {
 
                     if (image) {
                         const pos = toPDF(data.x, data.y, data.width, data.height);
+                        const imageRotate = rotation !== 0 ? degrees(rotation) : undefined;
                         page.drawImage(image, {
                             x: pos.x,
                             y: pos.y,
                             width: pos.width,
                             height: pos.height,
+                            ...(imageRotate !== undefined ? { rotate: imageRotate } : {}),
                         });
                     }
                 } catch (e) {
