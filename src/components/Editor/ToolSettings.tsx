@@ -17,13 +17,10 @@ export const ToolSettings: React.FC = () => {
         highlightSize
     } = toolSettings;
 
-    // 將設定值存到 window 物件供舊邏輯使用
+    // 將設定值存到 window 物件供 useEditorTools 使用（須為 hex，匯出 PDF 時才不會變成灰色）
     React.useEffect(() => {
-        (window as any).editorToolSettings = {
-            ...toolSettings,
-            highlightColor: `rgba(${parseInt(highlightColor.slice(1, 3), 16)}, ${parseInt(highlightColor.slice(3, 5), 16)}, ${parseInt(highlightColor.slice(5, 7), 16)}, ${highlightOpacity})`,
-        };
-    }, [toolSettings, highlightColor, highlightOpacity]);
+        (window as any).editorToolSettings = { ...toolSettings };
+    }, [toolSettings]);
 
     if (activeTool === 'select' || activeTool === 'hand' || activeTool === 'image') return null;
 

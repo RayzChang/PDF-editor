@@ -13,6 +13,7 @@
     "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.34.0",
     "i18next": "^25.8.4",

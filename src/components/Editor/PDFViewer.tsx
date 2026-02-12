@@ -21,7 +21,7 @@ export const PDFViewer: React.FC = () => {
     const {
         pdfDocument, pages, currentPage, scale, annotations,
         updateAnnotation, addAnnotation, activeTool,
-        setNativeTextItems
+        setNativeTextItems, selectAnnotation
     } = useEditorStore();
     const currentPageInfo = pages[currentPage - 1];
     const pageRotation = currentPageInfo?.rotation || 0;
@@ -223,23 +223,15 @@ export const PDFViewer: React.FC = () => {
                             const metrics = ctx.measureText(data.text);
                             const textWidth = metrics.width;
 
-                            // Use the larger of original width or new text width for the white box
-                            // to ensure we cover the original text, but also have background for new text if needed.
-                            // Actually, we primarily need to cover the *original* text area.
-                            // So we should probably keep using data.width (original PDF width) for the redaction box?
-                            // No, if user types longer text, we want white background behind it too? 
-                            // Usually native edit replaces implementation. 
-                            // Let's use the Max width.
+                            // 白底要蓋住原字 + 新字，取較大寬度並多留邊距避免露出原字
                             const boxWidth = Math.max((data.width || 0) * scale, textWidth);
-
                             const h = currentFontSize * scale;
-
-                            // Expand slightly
+                            const pad = 8;
                             ctx.fillRect(
-                                (data.x * scale) - 4,
-                                (data.y * scale) - 4,
-                                boxWidth + 8,
-                                h + 8
+                                (data.x * scale) - pad,
+                                (data.y * scale) - pad,
+                                boxWidth + pad * 2,
+                                h + pad * 2
                             );
                         }
 
@@ -324,15 +316,15 @@ export const PDFViewer: React.FC = () => {
 
                     // 文字特殊處理寬高
                     if (ann.type === 'text') {
-                        // 如果是原生編輯，data.width / height 已經是準確的 PDF 寬高
-                        // 如果是新加的文字，才需要估算
-                        if (data.isNativeEdit) {
-                            w = data.width;
-                            h = data.height;
-                        } else {
+                        // 使用 data.width / height 作為準確尺寸 (若有)
+                        w = data.width || 0;
+                        h = data.height || 0;
+
+                        // Fallback: 若無尺寸才估算 (不應發生在原生編輯)
+                        if (w === 0 || h === 0) {
                             const fontSize = data.fontSize || 16;
-                            w = (data.text?.length || 0) * fontSize * 0.6; // Rough estimate
-                            h = fontSize * 1.2; // Rough estimate with line height
+                            w = (data.text?.length || 0) * fontSize * 0.6;
+                            h = fontSize * 1.2;
                         }
                     }
                 }
@@ -394,6 +386,20 @@ export const PDFViewer: React.FC = () => {
 
     // 處理原生文字點擊 (原生座標已固定為 0 度座標)
     const handleNativeTextClick = useCallback((item: any) => {
+        // 防止同一段原生文字被重複建立多個「原生編輯」標註：
+        // 如果已經存在，直接選取並開啟編輯器，不再新增一個新的。
+        const existing = annotations.find(a =>
+            a.pageId === (currentPageInfo?.id || '') &&
+            a.type === 'text' &&
+            a.data?.isNativeEdit &&
+            a.data?.originalTextId === item.id
+        );
+        if (existing) {
+            selectAnnotation(existing.id);
+            setEditingTextId(existing.id);
+            return;
+        }
+
         const newTextAnnotation = {
             id: `text-edit-${Date.now()}`,
             type: 'text' as const,
@@ -410,13 +416,15 @@ export const PDFViewer: React.FC = () => {
                 color: '#000000',
                 fontFamily: 'Arial',
                 isNativeEdit: true,
-                originalTextId: item.id
+                originalTextId: item.id,
+                // 儲存「原字」位置：拖曳後匯出時白底仍蓋原處，新字畫在拖曳後的位置
+                nativeEditOrigin: { x: item.x, y: item.yTop, width: item.width, height: item.height }
             }
         };
 
         addAnnotation(newTextAnnotation);
         setEditingTextId(newTextAnnotation.id);
-    }, [currentPageId, addAnnotation]);
+    }, [annotations, currentPageInfo?.id, addAnnotation, selectAnnotation]);
 
     // 監聽新增的文字或註解標註,自動開啟編輯器
     useEffect(() => {
@@ -563,7 +571,7 @@ export const PDFViewer: React.FC = () => {
                                     left: 0,
                                     width: '100%',
                                     height: '100%',
-                                    zIndex: 40,
+                                    zIndex: 50, // interactionLayer 提升到 50
                                     cursor: activeTool === 'hand' ? 'grab' : (activeTool === 'select' ? 'default' : 'crosshair'),
                                     // 確保 Select/Draw 等工具都能接收事件
                                     pointerEvents: activeTool !== 'hand' ? 'auto' : 'none'
@@ -577,8 +585,8 @@ export const PDFViewer: React.FC = () => {
                                         left: 0,
                                         width: '100%',
                                         height: '100%',
-                                        zIndex: 1, // Within parent 40
-                                        pointerEvents: 'none',
+                                        zIndex: 40, // annotationCanvas 負責繪圖，zIndex 40
+                                        pointerEvents: 'none', // 永遠不收事件
                                     }}
                                 />
                             </div>
@@ -590,7 +598,7 @@ export const PDFViewer: React.FC = () => {
                                 left: 0,
                                 width: '100%',
                                 height: '100%',
-                                zIndex: 60,
+                                zIndex: 60, // NativeTextLayer 最上層，但父層穿透
                                 // 強制設為 none，避免攔截事件
                                 pointerEvents: 'none'
                             }}>

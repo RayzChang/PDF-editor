@@ -45,17 +45,17 @@ export const useSelectTool = (
 
                 switch (ann.type) {
                     case 'text':
-                        // 文字: 檢查點擊區域
                         // 文字: 檢查點擊區域 (優先使用 data.width/height)
                         const w = data.width || ((data.text?.length || 0) * (data.fontSize || 16) * 0.6);
                         const h = data.height || (data.fontSize || 16);
 
                         const padding = 5; // 增加點擊緩衝
 
+                        // 判斷是否在矩形範圍內
                         if (
                             x >= (data.x || 0) - padding &&
                             x <= (data.x || 0) + w + padding &&
-                            y >= (data.y || 0) - padding && // data.y is top-left
+                            y >= (data.y || 0) - padding &&
                             y <= (data.y || 0) + h + padding
                         ) {
                             return ann;
