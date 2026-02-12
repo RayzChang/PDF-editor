@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useEditorStore } from '../store/editor-store';
+import { useEditorStore, type TextAnnotationData } from '../store/editor-store';
 
 export const useTextAnnotationClick = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -27,14 +27,15 @@ export const useTextAnnotationClick = (
 
             for (const ann of pageAnnotations) {
                 // 簡單的點擊檢測:檢查點是否在文字區域附近
-                const textWidth = (ann.data.text?.length || 0) * (ann.data.fontSize || 16) * 0.6;
-                const textHeight = (ann.data.fontSize || 16) * 1.2;
+                const data = ann.data as TextAnnotationData;
+                const textWidth = (data.text?.length || 0) * (data.fontSize || 16) * 0.6;
+                const textHeight = (data.fontSize || 16) * 1.2;
 
                 if (
-                    x >= ann.data.x &&
-                    x <= ann.data.x + textWidth &&
-                    y >= ann.data.y - textHeight &&
-                    y <= ann.data.y
+                    x >= data.x &&
+                    x <= data.x + textWidth &&
+                    y >= data.y - textHeight &&
+                    y <= data.y
                 ) {
                     onTextClick(ann.id);
                     break;

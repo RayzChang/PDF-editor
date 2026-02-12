@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import {
     FolderOpen,
@@ -9,7 +9,6 @@ import {
     Redo,
     ZoomIn,
     ZoomOut,
-    Maximize,
     MousePointer,
     Type,
     Pencil,
@@ -22,18 +21,21 @@ import {
     Hand,
     RotateCcw,
     RotateCw,
+    X,
 } from 'lucide-react';
 import { useEditorStore } from '../../store/editor-store';
 import type { Tool } from '../../store/editor-store';
 import { useUIStore } from '../../store/ui-store';
 import { pdfRenderer } from '../../lib/pdf-renderer';
 import { PDFEditor } from '../../lib/pdf-editor';
+import { PDFConverter } from '../../lib/pdf-converter';
 import { LanguageSwitcher } from '../UI/LanguageSwitcher';
 import { ThemeToggle } from '../UI/ThemeToggle';
 
 export const Toolbar: React.FC = () => {
     const { t } = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [showExportMenu, setShowExportMenu] = React.useState(false);
 
     const {
         pdfDocument,
@@ -75,9 +77,14 @@ export const Toolbar: React.FC = () => {
             setPdfDocument(doc, file);
         } catch (error) {
             console.error('載入 PDF 失敗:', error);
-            setError(t('upload.error'));
+            const message = error instanceof Error ? error.message : t('upload.error');
+            setError(message);
         } finally {
             setLoading(false);
+            // 重置 input value，這樣下次選擇檔案時（即使是同一個檔案）也會觸發 onChange
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
         }
     };
 
@@ -93,22 +100,50 @@ export const Toolbar: React.FC = () => {
             await PDFEditor.downloadPDF(finalDoc, fileName.replace('.pdf', '_edited.pdf'));
         } catch (error) {
             console.error('儲存失敗:', error);
-            setError('儲存失敗');
+            const message = error instanceof Error ? error.message : '儲存失敗';
+            setError(`儲存失敗: ${message}`);
         } finally {
             setLoading(false);
         }
     };
 
-    // 匯出
-    const handleExport = async () => {
+    // 匯出（支援多種格式）
+    const handleExport = async (format: 'pdf' | 'png' | 'jpg' = 'pdf') => {
         if (!pdfFile) return;
-        await handleSave();
+
+        setLoading(true);
+        setError(null);
+        setShowExportMenu(false);
+
+        try {
+            const pdfDoc = await PDFEditor.loadPDF(pdfFile);
+            const finalDoc = await PDFEditor.applyAnnotations(pdfDoc, annotations, pages);
+
+            if (format === 'pdf') {
+                // 匯出為 PDF
+                await PDFEditor.downloadPDF(finalDoc, fileName.replace('.pdf', '_edited.pdf'));
+            } else {
+                // 匯出為圖片（PNG 或 JPG）
+                // 直接從編輯後的 PDFDocument 轉換為圖片
+                const images = await PDFConverter.pdfDocumentToImage(finalDoc, format, 0.95);
+                
+                // 下載所有頁面的圖片
+                const baseName = fileName.replace('.pdf', '');
+                await PDFConverter.downloadImages(images, baseName, format);
+            }
+        } catch (error) {
+            console.error('匯出失敗:', error);
+            const message = error instanceof Error ? error.message : '匯出失敗';
+            setError(`匯出失敗: ${message}`);
+        } finally {
+            setLoading(false);
+        }
     };
+
 
     // 縮放
     const handleZoomIn = () => setScale(scale + 0.25);
     const handleZoomOut = () => setScale(scale - 0.25);
-    const handleFitPage = () => setScale(1.0);
 
     // 旋轉 (改為每頁獨立)
     const rotateLeft = () => rotateCurrentPage(-90);
@@ -177,7 +212,7 @@ export const Toolbar: React.FC = () => {
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         className="toolbar-button"
-                        onClick={handleExport}
+                        onClick={() => setShowExportMenu(true)}
                         disabled={!pdfDocument}
                         title={t('toolbar.export')}
                     >
@@ -256,15 +291,6 @@ export const Toolbar: React.FC = () => {
                     >
                         <ZoomIn size={18} />
                     </motion.button>
-                    <motion.button
-                        whileTap={{ scale: 0.9 }}
-                        className="toolbar-button"
-                        onClick={handleFitPage}
-                        disabled={!pdfDocument}
-                        title={t('toolbar.fitPage')}
-                    >
-                        <Maximize size={18} />
-                    </motion.button>
                 </div>
 
                 {/* 旋轉 */}
@@ -304,6 +330,185 @@ export const Toolbar: React.FC = () => {
                     <LanguageSwitcher />
                 </div>
             </motion.div >
+
+            {/* 匯出格式選擇彈出視窗 */}
+            <AnimatePresence>
+                {showExportMenu && (
+                    <>
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowExportMenu(false)}
+                            style={{
+                                position: 'fixed',
+                                inset: 0,
+                                background: 'rgba(0, 0, 0, 0.5)',
+                                zIndex: 1040,
+                            }}
+                        />
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            style={{
+                                position: 'fixed',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                background: 'var(--bg-elevated)',
+                                borderRadius: 'var(--radius-lg)',
+                                boxShadow: 'var(--shadow-xl)',
+                                zIndex: 1050,
+                                minWidth: '280px',
+                                padding: 'var(--spacing-lg)',
+                            }}
+                        >
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: 'var(--spacing-md)',
+                            }}>
+                                <h3 style={{
+                                    margin: 0,
+                                    fontSize: '1.1rem',
+                                    fontWeight: 600,
+                                    color: 'var(--text-primary)',
+                                }}>
+                                    選擇匯出格式
+                                </h3>
+                                <button
+                                    onClick={() => setShowExportMenu(false)}
+                                    style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        color: 'var(--text-secondary)',
+                                        cursor: 'pointer',
+                                        padding: '4px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        borderRadius: 'var(--radius-sm)',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-tertiary)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'transparent';
+                                    }}
+                                >
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 'var(--spacing-sm)',
+                            }}>
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => handleExport('pdf')}
+                                    style={{
+                                        width: '100%',
+                                        padding: 'var(--spacing-md)',
+                                        background: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-primary)',
+                                        borderRadius: 'var(--radius-md)',
+                                        color: 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.95rem',
+                                        fontWeight: 500,
+                                        textAlign: 'left',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 'var(--spacing-sm)',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-tertiary)';
+                                        e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-secondary)';
+                                        e.currentTarget.style.borderColor = 'var(--border-primary)';
+                                    }}
+                                >
+                                    <span style={{ fontWeight: 600 }}>PDF</span>
+                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        可編輯的 PDF 檔案
+                                    </span>
+                                </motion.button>
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => handleExport('png')}
+                                    style={{
+                                        width: '100%',
+                                        padding: 'var(--spacing-md)',
+                                        background: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-primary)',
+                                        borderRadius: 'var(--radius-md)',
+                                        color: 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.95rem',
+                                        fontWeight: 500,
+                                        textAlign: 'left',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 'var(--spacing-sm)',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-tertiary)';
+                                        e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-secondary)';
+                                        e.currentTarget.style.borderColor = 'var(--border-primary)';
+                                    }}
+                                >
+                                    <span style={{ fontWeight: 600 }}>PNG</span>
+                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        高品質圖片（透明背景）
+                                    </span>
+                                </motion.button>
+                                <motion.button
+                                    whileHover={{ scale: 1.02 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    onClick={() => handleExport('jpg')}
+                                    style={{
+                                        width: '100%',
+                                        padding: 'var(--spacing-md)',
+                                        background: 'var(--bg-secondary)',
+                                        border: '1px solid var(--border-primary)',
+                                        borderRadius: 'var(--radius-md)',
+                                        color: 'var(--text-primary)',
+                                        cursor: 'pointer',
+                                        fontSize: '0.95rem',
+                                        fontWeight: 500,
+                                        textAlign: 'left',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 'var(--spacing-sm)',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-tertiary)';
+                                        e.currentTarget.style.borderColor = 'var(--color-primary)';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'var(--bg-secondary)';
+                                        e.currentTarget.style.borderColor = 'var(--border-primary)';
+                                    }}
+                                >
+                                    <span style={{ fontWeight: 600 }}>JPG</span>
+                                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        壓縮圖片（較小檔案）
+                                    </span>
+                                </motion.button>
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
         </>
     );
 };

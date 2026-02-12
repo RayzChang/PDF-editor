@@ -13,6 +13,69 @@ export type Tool =
 
 export type ShapeType = 'rectangle' | 'circle' | 'line' | 'arrow' | 'polygon';
 
+// Annotation Data Types
+export interface TextAnnotationData {
+    text: string;
+    x: number;
+    y: number;
+    fontSize: number;
+    color?: string;
+    fontFamily?: string;
+    fontStyle?: 'normal' | 'italic';
+    fontWeight?: 'normal' | 'bold';
+    isNativeEdit?: boolean;
+    nativeEditOrigin?: { x: number; y: number; width: number; height: number };
+    originalTextId?: string;
+    width?: number;
+    height?: number;
+    baselineY?: number; // For native text editing
+}
+
+export interface DrawAnnotationData {
+    points: Array<{ x: number; y: number }>;
+    color?: string;
+    thickness?: number;
+}
+
+export interface ShapeAnnotationData {
+    shapeType: ShapeType;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    borderColor?: string;
+    borderWidth?: number;
+    fillColor?: string;
+}
+
+export interface ImageAnnotationData {
+    imageData: string; // data URL
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export interface HighlightAnnotationData {
+    points: Array<{ x: number; y: number }>;
+    color?: string;
+    size?: number;
+    opacity?: number;
+}
+
+export interface EraserAnnotationData {
+    points: Array<{ x: number; y: number }>;
+    size?: number;
+}
+
+export type AnnotationData =
+    | TextAnnotationData
+    | DrawAnnotationData
+    | ShapeAnnotationData
+    | ImageAnnotationData
+    | HighlightAnnotationData
+    | EraserAnnotationData;
+
 export interface PageInfo {
     id: string;
     type: 'original' | 'blank';
@@ -24,7 +87,7 @@ export interface Annotation {
     id: string;
     type: Tool;
     pageId: string;
-    data: any;
+    data: AnnotationData;
     timestamp: number;
 }
 
@@ -101,7 +164,7 @@ export interface EditorState {
     updateToolSettings: (settings: Partial<ToolSettings>) => void;
     addAnnotation: (annotation: Annotation) => void;
     removeAnnotation: (id: string) => void;
-    updateAnnotation: (id: string, data: any) => void;
+    updateAnnotation: (id: string, data: Partial<AnnotationData>) => void;
     selectAnnotation: (id: string | null) => void;
     undo: () => void;
     redo: () => void;

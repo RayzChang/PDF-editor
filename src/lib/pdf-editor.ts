@@ -1,6 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, degrees, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
-import type { Annotation, PageInfo } from '../store/editor-store';
+import type { Annotation, PageInfo, TextAnnotationData, DrawAnnotationData, EraserAnnotationData, HighlightAnnotationData, ShapeAnnotationData, ImageAnnotationData } from '../store/editor-store';
 import { mapToExportCoords } from '../utils/coordinate-utils';
 
 /**
@@ -249,11 +249,11 @@ export class PDFEditor {
         let cjkFont: PDFFont | null = null;
         let cjkFontBold: PDFFont | null = null;
         const needsCjk = annotations.some(
-            (a) => a.type === 'text' && a.data?.text && needsUnicodeFont(a.data.text)
+            (a) => a.type === 'text' && (a.data as TextAnnotationData).text && needsUnicodeFont((a.data as TextAnnotationData).text)
         );
         const needsCjkBold = annotations.some(
-            (a) => a.type === 'text' && a.data?.text && needsUnicodeFont(a.data.text) && 
-                   (a.data?.fontWeight === 'bold' || a.data?.fontWeight === '700')
+            (a) => a.type === 'text' && (a.data as TextAnnotationData).text && needsUnicodeFont((a.data as TextAnnotationData).text) && 
+                   (a.data as TextAnnotationData).fontWeight === 'bold'
         );
         
         if (needsCjk) {
@@ -341,11 +341,12 @@ export class PDFEditor {
 
         // Pass 1: 只畫「所有文字標註」的白底（先全部蓋完，再畫字，才不會 A 的白底蓋住 B 的字）
         for (const annotation of sorted) {
-            if (annotation.type !== 'text' || !annotation.data?.text) continue;
+            if (annotation.type !== 'text') continue;
+            const data = annotation.data as TextAnnotationData;
+            if (!data.text) continue;
             const ctx = getPageCtx(annotation);
             if (!ctx) continue;
             const { page, toPDF } = ctx;
-            const data = annotation.data;
             const fontSize = data.fontSize || 12;
             const textToDraw = data.text || '';
             const lineCount = Math.max(1, textToDraw.split(/\r?\n/).filter(Boolean).length);
@@ -390,54 +391,59 @@ export class PDFEditor {
             const page = pages[pageIndex];
             const { width, height } = page.getSize();
             const rotation = pageInfo.rotation || 0;
-            const data = annotation.data;
             const toPDF = (x: number, y: number, w: number = 0, h: number = 0) =>
                 mapToExportCoords(x, y, w, h, width, height, rotation);
 
-            if (annotation.type === 'text' && data.text) {
-                const fontSize = data.fontSize || 12;
-                const textToDraw = data.text || '';
-                const lineHeight = fontSize * 1.2;
-                const useCjk = cjkFont && needsUnicodeFont(textToDraw);
-                const safeText = useCjk ? textToDraw : toWinAnsiSafe(textToDraw);
-                // 選擇字型：標準字型支援粗體/斜體變體；CJK 字型目前不支援（變數字型的 weight 需要額外處理）
-                const textFont = useCjk 
-                    ? getCjkFont(data.fontWeight) || cjkFont!
-                    : getStandardFont(data.fontWeight, data.fontStyle);
-                const color = parseColor(data.color);
-                const lines = safeText.split(/\r?\n/);
-                // 頁面有旋轉時，文字需同向旋轉才會在檢視時維持正常閱讀（與頁面一起轉，才不會顛倒）
-                const textRotate = rotation !== 0 ? degrees(rotation) : undefined;
-                for (let i = 0; i < lines.length; i++) {
-                    if (!lines[i]) continue;
-                    const linePos = toPDF(data.x, data.y + i * lineHeight, 0, fontSize);
-                    page.drawText(lines[i], {
-                        x: linePos.x,
-                        y: linePos.y,
-                        size: fontSize,
-                        font: textFont,
-                        color,
-                        ...(textRotate !== undefined ? { rotate: textRotate } : {}),
-                    });
+            if (annotation.type === 'text') {
+                const data = annotation.data as TextAnnotationData;
+                if (data.text) {
+                    const fontSize = data.fontSize || 12;
+                    const textToDraw = data.text || '';
+                    const lineHeight = fontSize * 1.2;
+                    const useCjk = cjkFont && needsUnicodeFont(textToDraw);
+                    const safeText = useCjk ? textToDraw : toWinAnsiSafe(textToDraw);
+                    // 選擇字型：標準字型支援粗體/斜體變體；CJK 字型目前不支援（變數字型的 weight 需要額外處理）
+                    const textFont = useCjk 
+                        ? getCjkFont(data.fontWeight || 'normal') || cjkFont!
+                        : getStandardFont(data.fontWeight || 'normal', data.fontStyle || 'normal');
+                    const color = parseColor(data.color || '#000000');
+                    const lines = safeText.split(/\r?\n/);
+                    // 頁面有旋轉時，文字需同向旋轉才會在檢視時維持正常閱讀（與頁面一起轉，才不會顛倒）
+                    const textRotate = rotation !== 0 ? degrees(rotation) : undefined;
+                    for (let i = 0; i < lines.length; i++) {
+                        if (!lines[i]) continue;
+                        const linePos = toPDF(data.x, data.y + i * lineHeight, 0, fontSize);
+                        page.drawText(lines[i], {
+                            x: linePos.x,
+                            y: linePos.y,
+                            size: fontSize,
+                            font: textFont,
+                            color,
+                            ...(textRotate !== undefined ? { rotate: textRotate } : {}),
+                        });
+                    }
                 }
             } else if (annotation.type === 'draw' || annotation.type === 'highlight' || annotation.type === 'eraser') {
+                const data = annotation.data as DrawAnnotationData | HighlightAnnotationData | EraserAnnotationData;
                 if (data.points && data.points.length > 1) {
                     const path = data.points;
                     // 若未指定顏色，預設：筆記為黑色，高亮為黃色
-                    const baseColorHex = data.color || (annotation.type === 'highlight' ? '#FFFF00' : '#000000');
+                    const baseColorHex = ('color' in data ? data.color : undefined) || (annotation.type === 'highlight' ? '#FFFF00' : '#000000');
                     let pathColor = parseColor(baseColorHex);
                     let opacity = 1;
-                    let thickness = data.thickness || 2;
+                    let thickness = ('thickness' in data ? data.thickness : 2) || 2;
 
                     if (annotation.type === 'highlight') {
-                        opacity = data.opacity || 0.3;
-                        thickness = data.size || 10;
+                        const highlightData = data as HighlightAnnotationData;
+                        opacity = highlightData.opacity || 0.3;
+                        thickness = highlightData.size || 10;
                         // 若有存顏色但格式既非 #hex 也非 rgba，parseColor 會回黑，匯出會變灰 → 強制黃色
-                        const raw = (data.color || '').trim();
+                        const raw = (highlightData.color || '').trim();
                         if (raw && !raw.startsWith('#') && !raw.toLowerCase().startsWith('rgba')) pathColor = rgb(1, 1, 0);
                     } else if (annotation.type === 'eraser') {
+                        const eraserData = data as EraserAnnotationData;
                         pathColor = rgb(1, 1, 1);
-                        thickness = data.size || 10;
+                        thickness = eraserData.size || 10;
                     }
 
                     const lineCapRound = 1 as const; // Round cap 讓線段兩端圓滑蓋滿
@@ -458,7 +464,8 @@ export class PDFEditor {
                     }
                     // 橡皮擦：在每個路徑點再畫一個白圓，避免線段間隙或端點沒蓋到
                     if (annotation.type === 'eraser' && path.length > 0) {
-                        const diameter = data.size || 10;
+                        const eraserData = data as EraserAnnotationData;
+                        const diameter = eraserData.size || 10;
                         for (const pt of path) {
                             const p = toPDF(pt.x, pt.y);
                             page.drawCircle({
@@ -473,8 +480,9 @@ export class PDFEditor {
                     }
                 }
             } else if (annotation.type === 'shape') {
-                const borderColor = parseColor(data.borderColor);
-                const fillColor = data.fillColor !== 'transparent' ? parseColor(data.fillColor) : undefined;
+                const data = annotation.data as ShapeAnnotationData;
+                const borderColor = parseColor(data.borderColor || '#000000');
+                const fillColor = data.fillColor && data.fillColor !== 'transparent' ? parseColor(data.fillColor) : undefined;
                 const borderWidth = data.borderWidth || 2;
                 const pos = toPDF(data.x, data.y, data.width, data.height);
 
@@ -490,39 +498,48 @@ export class PDFEditor {
                         opacity: fillColor ? 1 : 0,
                     });
                 } else if (data.shapeType === 'circle') {
+                    // 圓形：使用統一半徑（取 width 和 height 的絕對值中較小者的一半），確保是正圓形
+                    const absWidth = Math.abs(pos.width);
+                    const absHeight = Math.abs(pos.height);
+                    const radius = Math.min(absWidth, absHeight) / 2;
+                    const centerX = pos.x + (pos.width > 0 ? absWidth / 2 : -absWidth / 2);
+                    const centerY = pos.y + (pos.height > 0 ? absHeight / 2 : -absHeight / 2);
                     page.drawEllipse({
-                        x: pos.x + pos.width / 2,
-                        y: pos.y + pos.height / 2,
-                        xScale: pos.width / 2,
-                        yScale: pos.height / 2,
+                        x: centerX,
+                        y: centerY,
+                        xScale: radius,
+                        yScale: radius, // 使用統一半徑，確保是正圓形
                         borderColor: borderColor,
                         borderWidth: borderWidth,
                         color: fillColor,
                         opacity: fillColor ? 1 : 0,
                     });
                 }
-            } else if (annotation.type === 'image' && data.imageData) {
-                try {
-                    let image;
-                    if (data.imageData.startsWith('data:image/png')) {
-                        image = await pdfDoc.embedPng(data.imageData);
-                    } else if (data.imageData.startsWith('data:image/jpeg') || data.imageData.startsWith('data:image/jpg')) {
-                        image = await pdfDoc.embedJpg(data.imageData);
-                    }
+            } else if (annotation.type === 'image') {
+                const data = annotation.data as ImageAnnotationData;
+                if (data.imageData) {
+                    try {
+                        let image;
+                        if (data.imageData.startsWith('data:image/png')) {
+                            image = await pdfDoc.embedPng(data.imageData);
+                        } else if (data.imageData.startsWith('data:image/jpeg') || data.imageData.startsWith('data:image/jpg')) {
+                            image = await pdfDoc.embedJpg(data.imageData);
+                        }
 
-                    if (image) {
-                        const pos = toPDF(data.x, data.y, data.width, data.height);
-                        const imageRotate = rotation !== 0 ? degrees(rotation) : undefined;
-                        page.drawImage(image, {
-                            x: pos.x,
-                            y: pos.y,
-                            width: pos.width,
-                            height: pos.height,
-                            ...(imageRotate !== undefined ? { rotate: imageRotate } : {}),
-                        });
+                        if (image) {
+                            const pos = toPDF(data.x, data.y, data.width, data.height);
+                            const imageRotate = rotation !== 0 ? degrees(rotation) : undefined;
+                            page.drawImage(image, {
+                                x: pos.x,
+                                y: pos.y,
+                                width: pos.width,
+                                height: pos.height,
+                                ...(imageRotate !== undefined ? { rotate: imageRotate } : {}),
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Failed to embed image', e);
                     }
-                } catch (e) {
-                    console.error('Failed to embed image', e);
                 }
             }
         }

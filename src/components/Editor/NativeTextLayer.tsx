@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { useEditorStore, type NativeTextItem } from '../../store/editor-store';
+import { useEditorStore, type NativeTextItem, type TextAnnotationData } from '../../store/editor-store';
 
 interface NativeTextLayerProps {
     scale: number;
@@ -178,8 +178,8 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, rotatio
                 // 檢查這一行是否已經有對應的「原生文字編輯標註」
                 const hasNativeEditAnnotation = annotations.some(a =>
                     a.type === 'text' &&
-                    a.data?.isNativeEdit &&
-                    a.data?.originalTextId === group.id
+                    (a.data as TextAnnotationData).isNativeEdit &&
+                    (a.data as TextAnnotationData).originalTextId === group.id
                 );
 
                 // 使用 PDF.js viewport 進行精確座標轉換

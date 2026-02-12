@@ -8,6 +8,7 @@ import { useUIStore } from './store/ui-store';
 import { useEditorStore } from './store/editor-store';
 import { Loader2 } from 'lucide-react';
 import './lib/i18n';
+import packageJson from '../package.json';
 import './styles/index.css';
 
 // 載入指示器組件
@@ -149,7 +150,7 @@ function AppContent() {
         }}
       >
         <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--color-primary)' }}></span>
-        Rayz 開發製作 | v1.0.0
+        Rayz 開發製作 | v{packageJson.version}
       </div>
     </div>
   );

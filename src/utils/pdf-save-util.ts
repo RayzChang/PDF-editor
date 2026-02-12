@@ -1,5 +1,5 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
-import type { Annotation } from '../store/editor-store';
+import type { Annotation, TextAnnotationData } from '../store/editor-store';
 
 export class PDFSaveUtil {
     /**
@@ -31,26 +31,27 @@ export class PDFSaveUtil {
             const { height } = pdfPage.getSize();
 
             if (type === 'text') {
+                const textData = data as TextAnnotationData;
                 // 如果是原生文字編輯
-                if (data.isNativeEdit) {
+                if (textData.isNativeEdit) {
                     // 1. 在原始位置畫一個白塊蓋住舊文字
                     // 注意: PDF 座標是 Y-up，(0,0) 在左下角
                     pdfPage.drawRectangle({
-                        x: data.x,
-                        y: height - data.y - data.fontSize, // 轉換為 PDF 座標
-                        width: data.width || 100, // 這裡需要更精準的寬度計算
-                        height: data.fontSize,
+                        x: textData.x,
+                        y: height - textData.y - textData.fontSize, // 轉換為 PDF 座標
+                        width: textData.width || 100, // 這裡需要更精準的寬度計算
+                        height: textData.fontSize,
                         color: rgb(1, 1, 1), // 白色
                     });
                 }
 
                 // 2. 寫入新文字
-                pdfPage.drawText(data.text || '', {
-                    x: data.x,
-                    y: height - data.y - data.fontSize,
-                    size: data.fontSize || 12,
+                pdfPage.drawText(textData.text || '', {
+                    x: textData.x,
+                    y: height - textData.y - textData.fontSize,
+                    size: textData.fontSize || 12,
                     font: standardFont, // 暫時使用標準字體，進階需嵌入 PDF 原始字體
-                    color: hexToRgb(data.color || '#000000'),
+                    color: hexToRgb(textData.color || '#000000'),
                 });
             } else if (type === 'draw') {
                 // 實作手寫路徑繪製 (SVG Path 或多個 line)

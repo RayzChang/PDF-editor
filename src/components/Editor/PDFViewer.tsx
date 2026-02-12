@@ -10,6 +10,8 @@ import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { useSelectTool } from '../../hooks/useSelectTool';
 import { TextEditor } from './TextEditor';
 import { NativeTextLayer } from './NativeTextLayer';
+import { LRUImageCache } from '../../utils/image-cache';
+import type { DrawAnnotationData, EraserAnnotationData, ShapeAnnotationData, TextAnnotationData, ImageAnnotationData, HighlightAnnotationData } from '../../store/editor-store';
 
 export const PDFViewer: React.FC = () => {
     const { t } = useTranslation();
@@ -37,7 +39,8 @@ export const PDFViewer: React.FC = () => {
     const [currentViewport, setCurrentViewport] = useState<any>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const clickPos = useRef({ x: 0, y: 0 });
-    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+    const imageCache = useRef<LRUImageCache>(new LRUImageCache(50));
+    const renderAnimationFrameId = useRef<number | null>(null);
 
     // 使用編輯工具Hook
     useEditorTools(annotationCanvasRef, pdfCanvasRef, interactionLayerRef, setCursorPosition, imageInputRef, clickPos);
@@ -98,6 +101,7 @@ export const PDFViewer: React.FC = () => {
                     annotationCanvasRef.current.height = height;
                 }
 
+                // 渲染標註（使用最新的 annotations）
                 renderAnnotations();
 
                 // --- VERIFICATION LOG START ---
@@ -116,6 +120,7 @@ export const PDFViewer: React.FC = () => {
         } finally {
             setLoading(false);
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pdfDocument, currentPageInfo?.id, scale, pageRotation, setLoading, setNativeTextItems]);
 
     // 渲染標註
@@ -129,16 +134,16 @@ export const PDFViewer: React.FC = () => {
         // 清除Canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 繪製當前頁面的所有標註
-        const pageAnnotations = annotations.filter(
-            (ann) => ann.pageId === currentPageInfo?.id
-        );
+        // 繪製當前頁面的所有標註（按時間戳排序，最新的繪製在最上面）
+        const pageAnnotations = annotations
+            .filter((ann) => ann.pageId === currentPageInfo?.id)
+            .sort((a, b) => a.timestamp - b.timestamp); // 按時間戳升序排序，後添加的在上面
 
         pageAnnotations.forEach((ann) => {
-            const { data } = ann;
             switch (ann.type) {
-                case 'draw':
+                case 'draw': {
                     // 繪製路徑
+                    const data = ann.data as DrawAnnotationData;
                     if (data.points && data.points.length > 1) {
                         ctx.strokeStyle = data.color || '#000000';
                         ctx.lineWidth = (data.thickness || 2) * scale;
@@ -152,9 +157,11 @@ export const PDFViewer: React.FC = () => {
                         ctx.stroke();
                     }
                     break;
+                }
 
-                case 'eraser':
+                case 'eraser': {
                     // 繪製橡皮擦(白色遮罩)
+                    const data = ann.data as EraserAnnotationData;
                     if (data.points && data.points.length > 1) {
                         ctx.strokeStyle = '#FFFFFF';
                         ctx.lineWidth = (data.size || 20) * scale;
@@ -168,8 +175,10 @@ export const PDFViewer: React.FC = () => {
                         ctx.stroke();
                     }
                     break;
+                }
 
-                case 'shape':
+                case 'shape': {
+                    const data = ann.data as ShapeAnnotationData;
                     const startX = data.x * scale;
                     const startY = data.y * scale;
                     const width = (data.width || 0) * scale;
@@ -188,9 +197,14 @@ export const PDFViewer: React.FC = () => {
                             ctx.fillRect(startX, startY, width, height);
                         }
                     } else if (data.shapeType === 'circle') {
-                        const radius = Math.sqrt(width * width + height * height);
+                        // 圓形：使用統一半徑（取 width 和 height 的絕對值中較小者的一半），圓心在矩形中心
+                        const absWidth = Math.abs(width);
+                        const absHeight = Math.abs(height);
+                        const radius = Math.min(absWidth, absHeight) / 2;
+                        const centerX = startX + (width > 0 ? absWidth / 2 : -absWidth / 2);
+                        const centerY = startY + (height > 0 ? absHeight / 2 : -absHeight / 2);
                         ctx.beginPath();
-                        ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+                        ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
                         ctx.stroke();
                         if (data.fillColor) {
                             ctx.fill();
@@ -202,9 +216,11 @@ export const PDFViewer: React.FC = () => {
                         ctx.stroke();
                     }
                     break;
+                }
 
-                case 'text':
+                case 'text': {
                     // 原字位置：白底蓋掉（與匯出一致）；新增/修改後的字：半透明紅底預覽
+                    const data = ann.data as TextAnnotationData;
                     if (data.text) {
                         const currentFontSize = data.fontSize || 16;
                         const textToDraw = data.text || '';
@@ -242,8 +258,10 @@ export const PDFViewer: React.FC = () => {
                         ctx.fillText(data.text, data.x * scale, data.y * scale);
                     }
                     break;
+                }
 
-                case 'image':
+                case 'image': {
+                    const data = ann.data as ImageAnnotationData;
                     if (data.imageData) {
                         let img = imageCache.current.get(ann.id);
                         if (!img) {
@@ -264,9 +282,11 @@ export const PDFViewer: React.FC = () => {
                         }
                     }
                     break;
+                }
 
-                case 'highlight':
+                case 'highlight': {
                     // 繪製路徑型高亮
+                    const data = ann.data as HighlightAnnotationData;
                     if (data.points && data.points.length > 1) {
                         ctx.strokeStyle = data.color || '#FFFF00';
                         ctx.lineWidth = (data.size || 20) * scale;
@@ -282,6 +302,7 @@ export const PDFViewer: React.FC = () => {
                         ctx.globalAlpha = 1.0;
                     }
                     break;
+                }
             }
         });
 
@@ -289,10 +310,10 @@ export const PDFViewer: React.FC = () => {
         if (selectedAnnotation) {
             const ann = annotations.find(a => a.id === selectedAnnotation);
             if (ann && ann.pageId === currentPageInfo?.id) {
-                const data = ann.data;
                 let x = 0, y = 0, w = 0, h = 0;
 
                 if (ann.type === 'draw' || ann.type === 'eraser' || ann.type === 'highlight') {
+                    const data = ann.data as DrawAnnotationData | EraserAnnotationData | HighlightAnnotationData;
                     if (data.points && data.points.length > 0) {
                         const xs = data.points.map((p: any) => p.x);
                         const ys = data.points.map((p: any) => p.y);
@@ -301,25 +322,26 @@ export const PDFViewer: React.FC = () => {
                         w = Math.max(...xs) - x;
                         h = Math.max(...ys) - y;
                     }
-                } else {
+                } else if (ann.type === 'text') {
+                    const data = ann.data as TextAnnotationData;
+                    x = data.x;
+                    y = data.y;
+                    // 使用 data.width / height 作為準確尺寸 (若有)
+                    w = data.width || 0;
+                    h = data.height || 0;
+
+                    // Fallback: 若無尺寸才估算 (不應發生在原生編輯)
+                    if (w === 0 || h === 0) {
+                        const fontSize = data.fontSize || 16;
+                        w = (data.text?.length || 0) * fontSize * 0.6;
+                        h = fontSize * 1.2;
+                    }
+                } else if (ann.type === 'shape' || ann.type === 'image') {
+                    const data = ann.data as ShapeAnnotationData | ImageAnnotationData;
                     x = data.x;
                     y = data.y;
                     w = data.width || 0;
                     h = data.height || 0;
-
-                    // 文字特殊處理寬高
-                    if (ann.type === 'text') {
-                        // 使用 data.width / height 作為準確尺寸 (若有)
-                        w = data.width || 0;
-                        h = data.height || 0;
-
-                        // Fallback: 若無尺寸才估算 (不應發生在原生編輯)
-                        if (w === 0 || h === 0) {
-                            const fontSize = data.fontSize || 16;
-                            w = (data.text?.length || 0) * fontSize * 0.6;
-                            h = fontSize * 1.2;
-                        }
-                    }
                 }
 
                 // 繪製虛線框
@@ -357,12 +379,18 @@ export const PDFViewer: React.FC = () => {
     // 當 PDF 或頁面變化時重新渲染並置中
     useEffect(() => {
         if (pdfDocument || currentPageInfo?.type === 'blank') {
+            // 清理非當前頁的圖片快取（保留當前頁的圖片）
+            if (currentPageId) {
+                imageCache.current.clearByPage(currentPageId, annotations);
+            }
             renderPage();
             // 僅在文檔載入或換頁時自動置中，縮放(scale)時保持當前位置
             setTimeout(() => {
                 window.dispatchEvent(new CustomEvent('centerCanvas'));
             }, 150);
         }
+        // 注意：annotations 不應該在這裡，因為更新標註時不需要重新渲染整個 PDF 頁面
+        // 標註的更新會透過 renderAnnotations 處理
     }, [pdfDocument, currentPageId, renderPage, currentPageInfo]);
 
     // 縮放或旋轉時僅重新渲染
@@ -372,9 +400,25 @@ export const PDFViewer: React.FC = () => {
         }
     }, [scale, pageRotation, renderPage, pdfDocument]);
 
-    // 當標註變化時重新渲染標註層
+    // 當標註變化時重新渲染標註層（使用 requestAnimationFrame 節流）
     useEffect(() => {
-        renderAnnotations();
+        // 取消之前的動畫幀請求
+        if (renderAnimationFrameId.current !== null) {
+            cancelAnimationFrame(renderAnimationFrameId.current);
+        }
+        
+        // 使用 requestAnimationFrame 節流重繪
+        renderAnimationFrameId.current = requestAnimationFrame(() => {
+            renderAnnotations();
+            renderAnimationFrameId.current = null;
+        });
+        
+        // 清理函數
+        return () => {
+            if (renderAnimationFrameId.current !== null) {
+                cancelAnimationFrame(renderAnimationFrameId.current);
+            }
+        };
     }, [annotations, renderAnnotations]);
 
     // 處理原生文字點擊 (原生座標已固定為 0 度座標)
@@ -384,8 +428,8 @@ export const PDFViewer: React.FC = () => {
         const existing = annotations.find(a =>
             a.pageId === (currentPageInfo?.id || '') &&
             a.type === 'text' &&
-            a.data?.isNativeEdit &&
-            a.data?.originalTextId === item.id
+            (a.data as TextAnnotationData).isNativeEdit &&
+            (a.data as TextAnnotationData).originalTextId === item.id
         );
         if (existing) {
             selectAnnotation(existing.id);
@@ -427,7 +471,7 @@ export const PDFViewer: React.FC = () => {
         const now = Date.now();
 
         if (now - lastAnnotation.timestamp < 1000) {
-            if (lastAnnotation.type === 'text' && !lastAnnotation.data.text) {
+            if (lastAnnotation.type === 'text' && !(lastAnnotation.data as TextAnnotationData).text) {
                 setEditingTextId(lastAnnotation.id);
             }
         }

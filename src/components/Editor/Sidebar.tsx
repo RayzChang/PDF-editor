@@ -68,13 +68,16 @@ export const Sidebar: React.FC = () => {
     if (!sidebarOpen) return null;
 
     return (
-        <div className="sidebar" style={{ minWidth: '240px' }}>
+        <div className="sidebar" style={{ minWidth: '240px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div
                 style={{
                     padding: 'var(--spacing-lg) var(--spacing-md)',
                     borderBottom: '1px solid var(--border-primary)',
                     background: 'var(--bg-primary)',
                     zIndex: 10,
+                    position: 'sticky',
+                    top: 0,
+                    flexShrink: 0,
                 }}
             >
                 <div style={{
@@ -122,6 +125,8 @@ export const Sidebar: React.FC = () => {
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 'var(--spacing-sm)',
+                    overflowY: 'auto',
+                    flex: 1,
                 }}
             >
                 <AnimatePresence initial={false}>

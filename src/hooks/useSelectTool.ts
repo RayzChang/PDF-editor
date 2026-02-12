@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
-import { useEditorStore, type Annotation } from '../store/editor-store';
+import { useEditorStore, type Annotation, type TextAnnotationData, type DrawAnnotationData, type EraserAnnotationData, type HighlightAnnotationData, type ShapeAnnotationData, type ImageAnnotationData } from '../store/editor-store';
 import { convertMouseToPdfCoords } from '../utils/coordinate-utils';
 
 export const useSelectTool = (
@@ -41,11 +41,11 @@ export const useSelectTool = (
             // 從後往前查找(最新的在最上面)
             for (let i = pageAnnotations.length - 1; i >= 0; i--) {
                 const ann = pageAnnotations[i];
-                const data = ann.data;
 
                 switch (ann.type) {
-                    case 'text':
+                    case 'text': {
                         // 文字: 檢查點擊區域 (優先使用 data.width/height)
+                        const data = ann.data as TextAnnotationData;
                         const w = data.width || ((data.text?.length || 0) * (data.fontSize || 16) * 0.6);
                         const h = data.height || (data.fontSize || 16);
 
@@ -61,26 +61,31 @@ export const useSelectTool = (
                             return ann;
                         }
                         break;
+                    }
 
                     case 'draw':
                     case 'eraser':
-                    case 'highlight':
+                    case 'highlight': {
                         // 檢查路徑附近
+                        const data = ann.data as DrawAnnotationData | EraserAnnotationData | HighlightAnnotationData;
                         if (data.points) {
-                            const threshold = (data.thickness || data.size || 10) / 2 + 5;
+                            const threshold = ('thickness' in data ? data.thickness : 'size' in data ? data.size : 10) || 10;
+                            const thresholdValue = threshold / 2 + 5;
                             for (const point of data.points) {
                                 const distance = Math.sqrt(
                                     Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2)
                                 );
-                                if (distance < threshold) {
+                                if (distance < thresholdValue) {
                                     return ann;
                                 }
                             }
                         }
                         break;
+                    }
 
-                    case 'image':
+                    case 'image': {
                         // 圖片: 檢查矩形區域
+                        const data = ann.data as ImageAnnotationData;
                         const p = 5; // 圖片緩衝
                         if (
                             x >= data.x - p &&
@@ -91,9 +96,11 @@ export const useSelectTool = (
                             return ann;
                         }
                         break;
+                    }
 
-                    case 'shape':
+                    case 'shape': {
                         // 形狀:檢查矩形區域
+                        const data = ann.data as ShapeAnnotationData;
                         const width = data.width || 0;
                         const height = data.height || 0;
                         // 考慮到負數寬高(拖曳方向)
@@ -111,6 +118,7 @@ export const useSelectTool = (
                             return ann;
                         }
                         break;
+                    }
                 }
             }
             return null;
@@ -128,7 +136,7 @@ export const useSelectTool = (
             if (selectedAnnotation) {
                 const ann = annotations.find(a => a.id === selectedAnnotation);
                 if (ann && (ann.type === 'image' || ann.type === 'shape')) {
-                    const data = ann.data;
+                    const data = ann.data as ImageAnnotationData | ShapeAnnotationData;
                     const hSize = 8 / scale;
                     const handles = [
                         { id: 'nw', x: data.x, y: data.y },
@@ -156,14 +164,27 @@ export const useSelectTool = (
                 setActiveHandle(null);
                 setIsDragging(true);
                 dragStart.current = { x, y };
-                annotationStart.current = {
-                    x: annotation.data.x || 0,
-                    y: annotation.data.y || 0,
-                    width: annotation.data.width || 0,
-                    height: annotation.data.height || 0,
-                    points: annotation.data.points ? JSON.parse(JSON.stringify(annotation.data.points)) : undefined,
-                    baselineY: annotation.data.baselineY // Store baselineY
-                };
+                
+                // 根據 annotation 類型設定 annotationStart
+                if (annotation.type === 'text' || annotation.type === 'image' || annotation.type === 'shape') {
+                    const data = annotation.data as TextAnnotationData | ImageAnnotationData | ShapeAnnotationData;
+                    annotationStart.current = {
+                        x: data.x || 0,
+                        y: data.y || 0,
+                        width: data.width || 0,
+                        height: data.height || 0,
+                        baselineY: annotation.type === 'text' ? (data as TextAnnotationData).baselineY : undefined
+                    };
+                } else if (annotation.type === 'draw' || annotation.type === 'eraser' || annotation.type === 'highlight') {
+                    const data = annotation.data as DrawAnnotationData | EraserAnnotationData | HighlightAnnotationData;
+                    annotationStart.current = {
+                        x: 0,
+                        y: 0,
+                        width: 0,
+                        height: 0,
+                        points: data.points ? JSON.parse(JSON.stringify(data.points)) : undefined
+                    };
+                }
                 e.preventDefault();
             } else {
                 selectAnnotation(null);
@@ -185,66 +206,74 @@ export const useSelectTool = (
             const annotation = annotations.find((a) => a.id === selectedAnnotation);
             if (!annotation) return;
 
-            const newData = { ...annotation.data };
-
             if (activeHandle) {
-                // 縮放邏輯
-                const start = annotationStart.current;
-                switch (activeHandle) {
-                    case 'nw':
-                        newData.x = start.x + dx;
-                        newData.y = start.y + dy;
-                        newData.width = start.width - dx;
-                        newData.height = start.height - dy;
-                        break;
-                    case 'ne':
-                        newData.y = start.y + dy;
-                        newData.width = start.width + dx;
-                        newData.height = start.height - dy;
-                        break;
-                    case 'sw':
-                        newData.x = start.x + dx;
-                        newData.width = start.width - dx;
-                        newData.height = start.height + dy;
-                        break;
-                    case 'se':
-                        newData.width = start.width + dx;
-                        newData.height = start.height + dy;
-                        break;
+                // 縮放邏輯（僅適用於 image 和 shape）
+                if (annotation.type === 'image' || annotation.type === 'shape') {
+                    const start = annotationStart.current;
+                    const newData: Partial<ImageAnnotationData | ShapeAnnotationData> = {};
+                    switch (activeHandle) {
+                        case 'nw':
+                            newData.x = start.x + dx;
+                            newData.y = start.y + dy;
+                            newData.width = start.width - dx;
+                            newData.height = start.height - dy;
+                            break;
+                        case 'ne':
+                            newData.y = start.y + dy;
+                            newData.width = start.width + dx;
+                            newData.height = start.height - dy;
+                            break;
+                        case 'sw':
+                            newData.x = start.x + dx;
+                            newData.width = start.width - dx;
+                            newData.height = start.height + dy;
+                            break;
+                        case 'se':
+                            newData.width = start.width + dx;
+                            newData.height = start.height + dy;
+                            break;
+                    }
+                    updateAnnotation(selectedAnnotation, newData);
                 }
             } else {
                 // 一般移動邏輯
                 switch (annotation.type) {
-                    case 'text':
-                    case 'image':
-                    case 'shape':
-                        newData.x = annotationStart.current.x + dx;
-                        newData.y = annotationStart.current.y + dy;
-                        newData.x = annotationStart.current.x + dx;
-                        newData.y = annotationStart.current.y + dy;
-
-                        // Update baselineY if it exists (for native text)
+                    case 'text': {
+                        const newData: Partial<TextAnnotationData> = {
+                            x: annotationStart.current.x + dx,
+                            y: annotationStart.current.y + dy,
+                        };
                         if (annotationStart.current.baselineY !== undefined) {
-                            // dx, dy are in PDF space (because convertMouseToPdfCoords uses unscaledX/Y)
-                            // So we just add dy directly.
                             newData.baselineY = annotationStart.current.baselineY + dy;
                         }
+                        updateAnnotation(selectedAnnotation, newData);
                         break;
-
+                    }
+                    case 'image':
+                    case 'shape': {
+                        const newData: Partial<ImageAnnotationData | ShapeAnnotationData> = {
+                            x: annotationStart.current.x + dx,
+                            y: annotationStart.current.y + dy,
+                        };
+                        updateAnnotation(selectedAnnotation, newData);
+                        break;
+                    }
                     case 'draw':
                     case 'eraser':
-                    case 'highlight':
+                    case 'highlight': {
                         if (annotationStart.current.points) {
-                            newData.points = annotationStart.current.points.map((p: any) => ({
-                                x: p.x + dx,
-                                y: p.y + dy,
-                            }));
+                            const newData: Partial<DrawAnnotationData | EraserAnnotationData | HighlightAnnotationData> = {
+                                points: annotationStart.current.points.map((p: any) => ({
+                                    x: p.x + dx,
+                                    y: p.y + dy,
+                                }))
+                            };
+                            updateAnnotation(selectedAnnotation, newData);
                         }
                         break;
+                    }
                 }
             }
-
-            updateAnnotation(selectedAnnotation, newData);
         },
         [isDragging, selectedAnnotation, activeTool, scale, annotations, updateAnnotation, getCanvasCoordinates, activeHandle]
     );
@@ -257,14 +286,25 @@ export const useSelectTool = (
             if (selectedAnnotation) {
                 const annotation = annotations.find((a) => a.id === selectedAnnotation);
                 if (annotation) {
-                    annotationStart.current = {
-                        x: annotation.data.x || 0,
-                        y: annotation.data.y || 0,
-                        width: annotation.data.width || 0,
-                        height: annotation.data.height || 0,
-                        points: annotation.data.points ? JSON.parse(JSON.stringify(annotation.data.points)) : undefined,
-                        baselineY: annotation.data.baselineY
-                    };
+                    if (annotation.type === 'text' || annotation.type === 'image' || annotation.type === 'shape') {
+                        const data = annotation.data as TextAnnotationData | ImageAnnotationData | ShapeAnnotationData;
+                        annotationStart.current = {
+                            x: data.x || 0,
+                            y: data.y || 0,
+                            width: data.width || 0,
+                            height: data.height || 0,
+                            baselineY: annotation.type === 'text' ? (data as TextAnnotationData).baselineY : undefined
+                        };
+                    } else if (annotation.type === 'draw' || annotation.type === 'eraser' || annotation.type === 'highlight') {
+                        const data = annotation.data as DrawAnnotationData | EraserAnnotationData | HighlightAnnotationData;
+                        annotationStart.current = {
+                            x: 0,
+                            y: 0,
+                            width: 0,
+                            height: 0,
+                            points: data.points ? JSON.parse(JSON.stringify(data.points)) : undefined
+                        };
+                    }
                 }
             }
         }

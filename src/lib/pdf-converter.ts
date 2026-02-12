@@ -6,7 +6,7 @@ export type ConversionFormat = 'png' | 'jpg' | 'pdf' | 'docx';
 
 export class PDFConverter {
     /**
-     * PDF 轉圖片
+     * PDF 轉圖片（從 File）
      */
     static async pdfToImage(
         file: File,
@@ -40,6 +40,27 @@ export class PDFConverter {
         } catch (error) {
             console.error('PDF 轉圖片失敗:', error);
             throw new Error('PDF 轉圖片失敗');
+        }
+    }
+
+    /**
+     * PDFDocument 轉圖片（用於匯出編輯後的 PDF）
+     */
+    static async pdfDocumentToImage(
+        pdfDoc: PDFDocument,
+        format: 'png' | 'jpg' = 'png',
+        quality: number = 0.95
+    ): Promise<Blob[]> {
+        try {
+            // 將 PDFDocument 轉換為 Blob，然後使用 pdfRenderer 渲染
+            const pdfBytes = await pdfDoc.save();
+            const blob = new Blob([pdfBytes as any], { type: 'application/pdf' });
+            const file = new File([blob], 'temp.pdf', { type: 'application/pdf' });
+            
+            return await this.pdfToImage(file, format, quality);
+        } catch (error) {
+            console.error('PDFDocument 轉圖片失敗:', error);
+            throw new Error('PDFDocument 轉圖片失敗');
         }
     }
 

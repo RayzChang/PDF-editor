@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore, type Annotation } from '../store/editor-store';
+import { useEditorStore, type Annotation, type DrawAnnotationData, type EraserAnnotationData, type ShapeAnnotationData, type TextAnnotationData, type ImageAnnotationData, type HighlightAnnotationData } from '../store/editor-store';
 import { convertMouseToPdfCoords } from '../utils/coordinate-utils';
+import { LRUImageCache } from '../utils/image-cache';
 
 export const useEditorTools = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
@@ -26,7 +27,7 @@ export const useEditorTools = (
     const startPos = useRef({ x: 0, y: 0 });
     const currentPath = useRef<{ x: number; y: number }[]>([]);
     const tempAnnotation = useRef<Annotation | null>(null);
-    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
+    const imageCache = useRef<LRUImageCache>(new LRUImageCache(50));
 
     // 取得畫布座標 (由 InteractionLayer 統一提供 offsetX/Y)
     const getCanvasCoordinates = useCallback(
@@ -56,139 +57,156 @@ export const useEditorTools = (
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // 先繪製所有已存在的標註
-        const pageAnnotations = annotations.filter(
-            (ann) => ann.pageId === currentPageId
-        );
+        // 先繪製所有已存在的標註（按時間戳排序，最新的繪製在最上面）
+        const pageAnnotations = annotations
+            .filter((ann) => ann.pageId === currentPageId)
+            .sort((a, b) => a.timestamp - b.timestamp); // 按時間戳升序排序
 
         pageAnnotations.forEach((ann) => {
             switch (ann.type) {
-                case 'draw':
-                    if (ann.data.points && ann.data.points.length > 1) {
-                        ctx.strokeStyle = ann.data.color || '#000000';
-                        ctx.lineWidth = (ann.data.thickness || 2) * scale;
+                case 'draw': {
+                    const data = ann.data as DrawAnnotationData;
+                    if (data.points && data.points.length > 1) {
+                        ctx.strokeStyle = data.color || '#000000';
+                        ctx.lineWidth = (data.thickness || 2) * scale;
                         ctx.lineCap = 'round';
                         ctx.lineJoin = 'round';
                         ctx.beginPath();
-                        ctx.moveTo(ann.data.points[0].x * scale, ann.data.points[0].y * scale);
-                        for (let i = 1; i < ann.data.points.length; i++) {
-                            ctx.lineTo(ann.data.points[i].x * scale, ann.data.points[i].y * scale);
+                        ctx.moveTo(data.points[0].x * scale, data.points[0].y * scale);
+                        for (let i = 1; i < data.points.length; i++) {
+                            ctx.lineTo(data.points[i].x * scale, data.points[i].y * scale);
                         }
                         ctx.stroke();
                     }
                     break;
+                }
 
-                case 'eraser':
-                    if (ann.data.points && ann.data.points.length > 1) {
+                case 'eraser': {
+                    const data = ann.data as EraserAnnotationData;
+                    if (data.points && data.points.length > 1) {
                         ctx.strokeStyle = '#FFFFFF';
-                        ctx.lineWidth = (ann.data.size || 20) * scale;
+                        ctx.lineWidth = (data.size || 20) * scale;
                         ctx.lineCap = 'round';
                         ctx.lineJoin = 'round';
                         ctx.beginPath();
-                        ctx.moveTo(ann.data.points[0].x * scale, ann.data.points[0].y * scale);
-                        for (let i = 1; i < ann.data.points.length; i++) {
-                            ctx.lineTo(ann.data.points[i].x * scale, ann.data.points[i].y * scale);
+                        ctx.moveTo(data.points[0].x * scale, data.points[0].y * scale);
+                        for (let i = 1; i < data.points.length; i++) {
+                            ctx.lineTo(data.points[i].x * scale, data.points[i].y * scale);
                         }
                         ctx.stroke();
                     }
                     break;
+                }
 
-                case 'shape':
-                    const sX = ann.data.x * scale;
-                    const sY = ann.data.y * scale;
-                    const w = (ann.data.width || 0) * scale;
-                    const h = (ann.data.height || 0) * scale;
+                case 'shape': {
+                    const data = ann.data as ShapeAnnotationData;
+                    const sX = data.x * scale;
+                    const sY = data.y * scale;
+                    const w = (data.width || 0) * scale;
+                    const h = (data.height || 0) * scale;
 
-                    ctx.strokeStyle = ann.data.borderColor || '#000000';
-                    ctx.lineWidth = (ann.data.borderWidth || 2) * scale;
+                    ctx.strokeStyle = data.borderColor || '#000000';
+                    ctx.lineWidth = (data.borderWidth || 2) * scale;
 
-                    if (ann.data.fillColor) {
-                        ctx.fillStyle = ann.data.fillColor;
+                    if (data.fillColor) {
+                        ctx.fillStyle = data.fillColor;
                     }
 
-                    if (ann.data.shapeType === 'rectangle') {
+                    if (data.shapeType === 'rectangle') {
                         ctx.strokeRect(sX, sY, w, h);
-                        if (ann.data.fillColor) {
+                        if (data.fillColor) {
                             ctx.fillRect(sX, sY, w, h);
                         }
-                    } else if (ann.data.shapeType === 'circle') {
-                        const radius = Math.sqrt(w * w + h * h);
+                    } else if (data.shapeType === 'circle') {
+                        // 圓形：使用統一半徑（取 width 和 height 的絕對值中較小者的一半），圓心在矩形中心
+                        const absW = Math.abs(w);
+                        const absH = Math.abs(h);
+                        const radius = Math.min(absW, absH) / 2;
+                        const centerX = sX + (w > 0 ? absW / 2 : -absW / 2);
+                        const centerY = sY + (h > 0 ? absH / 2 : -absH / 2);
                         ctx.beginPath();
-                        ctx.arc(sX, sY, radius, 0, 2 * Math.PI);
+                        ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
                         ctx.stroke();
-                        if (ann.data.fillColor) {
+                        if (data.fillColor) {
                             ctx.fill();
                         }
-                    } else if (ann.data.shapeType === 'line') {
+                    } else if (data.shapeType === 'line') {
                         ctx.beginPath();
                         ctx.moveTo(sX, sY);
                         ctx.lineTo(sX + w, sY + h);
                         ctx.stroke();
                     }
                     break;
+                }
 
-                case 'text':
-                    if (ann.data.text) {
+                case 'text': {
+                    const data = ann.data as TextAnnotationData;
+                    if (data.text) {
                         // Copy Redaction Logic from PDFViewer
-                        const currentFontSize = ann.data.fontSize || 16;
-                        if (ann.data.isNativeEdit) {
+                        const currentFontSize = data.fontSize || 16;
+                        if (data.isNativeEdit) {
                             ctx.fillStyle = '#FFFFFF';
-                            const fontStr = `${ann.data.fontStyle || ''} ${ann.data.fontWeight || ''} ${currentFontSize * scale}px ${ann.data.fontFamily || 'Arial'}`;
+                            const fontStr = `${data.fontStyle || ''} ${data.fontWeight || ''} ${currentFontSize * scale}px ${data.fontFamily || 'Arial'}`;
                             ctx.font = fontStr.trim();
-                            const metrics = ctx.measureText(ann.data.text);
+                            const metrics = ctx.measureText(data.text);
                             const textWidth = metrics.width;
-                            const boxWidth = Math.max((ann.data.width || 0) * scale, textWidth);
+                            const boxWidth = Math.max((data.width || 0) * scale, textWidth);
                             const h = currentFontSize * scale;
 
                             ctx.fillRect(
-                                (ann.data.x * scale) - 4,
-                                (ann.data.y * scale) - 4,
+                                (data.x * scale) - 4,
+                                (data.y * scale) - 4,
                                 boxWidth + 8,
                                 h + 8
                             );
                         }
 
                         ctx.textBaseline = 'top';
-                        const fontStr = `${ann.data.fontStyle || ''} ${ann.data.fontWeight || ''} ${currentFontSize * scale}px ${ann.data.fontFamily || 'Arial'}`;
+                        const fontStr = `${data.fontStyle || ''} ${data.fontWeight || ''} ${currentFontSize * scale}px ${data.fontFamily || 'Arial'}`;
                         ctx.font = fontStr.trim();
-                        ctx.fillStyle = ann.data.color || '#000000';
-                        ctx.fillText(ann.data.text, ann.data.x * scale, ann.data.y * scale);
+                        ctx.fillStyle = data.color || '#000000';
+                        ctx.fillText(data.text, data.x * scale, data.y * scale);
                     }
                     break;
+                }
 
-                case 'image':
-                    if (ann.data.imageData) {
+                case 'image': {
+                    const data = ann.data as ImageAnnotationData;
+                    if (data.imageData) {
                         let img = imageCache.current.get(ann.id);
                         if (!img) {
                             img = new Image();
-                            img.src = ann.data.imageData;
+                            img.src = data.imageData;
                             img.onload = () => {
                                 // 圖片加載後觸發重繪
                                 drawTempAnnotation();
                             };
                             imageCache.current.set(ann.id, img);
                         } else if (img.complete) {
-                            ctx.drawImage(img, ann.data.x * scale, ann.data.y * scale, ann.data.width * scale, ann.data.height * scale);
+                            ctx.drawImage(img, data.x * scale, data.y * scale, data.width * scale, data.height * scale);
                         }
                     }
                     break;
+                }
 
-                case 'highlight':
-                    if (ann.data.points && ann.data.points.length > 1) {
-                        ctx.strokeStyle = ann.data.color || 'rgba(255, 255, 0, 0.3)';
-                        ctx.lineWidth = (ann.data.size || 20) * scale;
+                case 'highlight': {
+                    const data = ann.data as HighlightAnnotationData;
+                    if (data.points && data.points.length > 1) {
+                        ctx.strokeStyle = data.color || 'rgba(255, 255, 0, 0.3)';
+                        ctx.lineWidth = (data.size || 20) * scale;
                         ctx.lineCap = 'round';
                         ctx.lineJoin = 'round';
-                        ctx.globalAlpha = 0.4;
+                        ctx.globalAlpha = data.opacity || 0.4;
                         ctx.beginPath();
-                        ctx.moveTo(ann.data.points[0].x * scale, ann.data.points[0].y * scale);
-                        for (let i = 1; i < ann.data.points.length; i++) {
-                            ctx.lineTo(ann.data.points[i].x * scale, ann.data.points[i].y * scale);
+                        ctx.moveTo(data.points[0].x * scale, data.points[0].y * scale);
+                        for (let i = 1; i < data.points.length; i++) {
+                            ctx.lineTo(data.points[i].x * scale, data.points[i].y * scale);
                         }
                         ctx.stroke();
                         ctx.globalAlpha = 1.0;
                     }
                     break;
+                }
             }
         });
 
@@ -197,91 +215,118 @@ export const useEditorTools = (
         const ann = tempAnnotation.current;
 
         switch (ann.type) {
-            case 'draw':
+            case 'draw': {
                 // 繪製路徑
-                if (ann.data.points && ann.data.points.length > 1) {
-                    ctx.strokeStyle = ann.data.color || '#000000';
-                    ctx.lineWidth = (ann.data.thickness || 2) * scale;
+                const data = ann.data as DrawAnnotationData;
+                if (data.points && data.points.length > 1) {
+                    ctx.strokeStyle = data.color || '#000000';
+                    ctx.lineWidth = (data.thickness || 2) * scale;
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
                     ctx.beginPath();
-                    ctx.moveTo(ann.data.points[0].x * scale, ann.data.points[0].y * scale);
-                    for (let i = 1; i < ann.data.points.length; i++) {
-                        ctx.lineTo(ann.data.points[i].x * scale, ann.data.points[i].y * scale);
+                    ctx.moveTo(data.points[0].x * scale, data.points[0].y * scale);
+                    for (let i = 1; i < data.points.length; i++) {
+                        ctx.lineTo(data.points[i].x * scale, data.points[i].y * scale);
                     }
                     ctx.stroke();
                 }
                 break;
+            }
 
-            case 'eraser':
+            case 'eraser': {
                 // 繪製橡皮擦路徑(白色)
-                if (ann.data.points && ann.data.points.length > 1) {
+                const data = ann.data as EraserAnnotationData;
+                if (data.points && data.points.length > 1) {
                     ctx.strokeStyle = '#FFFFFF';
-                    ctx.lineWidth = (ann.data.size || 20) * scale;
+                    ctx.lineWidth = (data.size || 20) * scale;
                     ctx.lineCap = 'round';
                     ctx.lineJoin = 'round';
                     ctx.beginPath();
-                    ctx.moveTo(ann.data.points[0].x * scale, ann.data.points[0].y * scale);
-                    for (let i = 1; i < ann.data.points.length; i++) {
-                        ctx.lineTo(ann.data.points[i].x * scale, ann.data.points[i].y * scale);
+                    ctx.moveTo(data.points[0].x * scale, data.points[0].y * scale);
+                    for (let i = 1; i < data.points.length; i++) {
+                        ctx.lineTo(data.points[i].x * scale, data.points[i].y * scale);
                     }
                     ctx.stroke();
                 }
                 break;
+            }
 
-            case 'shape':
-            case 'highlight':
-                const width2 = (ann.data.width || 0) * scale;
-                const height2 = (ann.data.height || 0) * scale;
-                const sx = ann.data.x * scale;
-                const sy = ann.data.y * scale;
+            case 'shape': {
+                const data = ann.data as ShapeAnnotationData;
+                const width2 = (data.width || 0) * scale;
+                const height2 = (data.height || 0) * scale;
+                const sx = data.x * scale;
+                const sy = data.y * scale;
 
-                if (ann.type === 'shape') {
-                    ctx.strokeStyle = ann.data.borderColor || '#000000';
-                    ctx.lineWidth = (ann.data.borderWidth || 2) * scale;
+                ctx.strokeStyle = data.borderColor || '#000000';
+                ctx.lineWidth = (data.borderWidth || 2) * scale;
 
-                    if (ann.data.fillColor) {
-                        ctx.fillStyle = ann.data.fillColor;
+                if (data.fillColor) {
+                    ctx.fillStyle = data.fillColor;
+                }
+
+                if (data.shapeType === 'rectangle') {
+                    ctx.strokeRect(sx, sy, width2, height2);
+                    if (data.fillColor) {
+                        ctx.fillRect(sx, sy, width2, height2);
                     }
-
-                    if (ann.data.shapeType === 'rectangle') {
-                        ctx.strokeRect(sx, sy, width2, height2);
-                        if (ann.data.fillColor) {
-                            ctx.fillRect(sx, sy, width2, height2);
-                        }
-                    } else if (ann.data.shapeType === 'circle') {
-                        const radius = Math.sqrt(width2 * width2 + height2 * height2);
-                        ctx.beginPath();
-                        ctx.arc(sx, sy, radius, 0, 2 * Math.PI);
-                        ctx.stroke();
-                        if (ann.data.fillColor) {
-                            ctx.fill();
-                        }
-                    } else if (ann.data.shapeType === 'line') {
-                        ctx.beginPath();
-                        ctx.moveTo(sx, sy);
-                        ctx.lineTo(sx + width2, sy + height2);
-                        ctx.stroke();
+                } else if (data.shapeType === 'circle') {
+                    // 圓形：使用統一半徑（取 width 和 height 的絕對值中較小者的一半），圓心在矩形中心
+                    const absW = Math.abs(width2);
+                    const absH = Math.abs(height2);
+                    const radius = Math.min(absW, absH) / 2;
+                    const centerX = sx + (width2 > 0 ? absW / 2 : -absW / 2);
+                    const centerY = sy + (height2 > 0 ? absH / 2 : -absH / 2);
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+                    ctx.stroke();
+                    if (data.fillColor) {
+                        ctx.fill();
                     }
+                } else if (data.shapeType === 'line') {
+                    ctx.beginPath();
+                    ctx.moveTo(sx, sy);
+                    ctx.lineTo(sx + width2, sy + height2);
+                    ctx.stroke();
                 }
                 break;
+            }
 
+            case 'highlight': {
+                const data = ann.data as HighlightAnnotationData;
+                if (data.points && data.points.length > 1) {
+                    ctx.strokeStyle = data.color || 'rgba(255, 255, 0, 0.3)';
+                    ctx.lineWidth = (data.size || 20) * scale;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    ctx.globalAlpha = data.opacity || 0.4;
+                    ctx.beginPath();
+                    ctx.moveTo(data.points[0].x * scale, data.points[0].y * scale);
+                    for (let i = 1; i < data.points.length; i++) {
+                        ctx.lineTo(data.points[i].x * scale, data.points[i].y * scale);
+                    }
+                    ctx.stroke();
+                    ctx.globalAlpha = 1.0;
+                }
                 break;
+            }
 
-            case 'image':
+            case 'image': {
                 // 圖片:繪製圖片
-                if (ann.data.imageData) {
+                const data = ann.data as ImageAnnotationData;
+                if (data.imageData) {
                     let img = imageCache.current.get(ann.id);
                     if (!img) {
                         img = new Image();
-                        img.src = ann.data.imageData;
+                        img.src = data.imageData;
                         img.onload = () => drawTempAnnotation();
                         imageCache.current.set(ann.id, img);
                     } else if (img.complete) {
-                        ctx.drawImage(img, ann.data.x * scale, ann.data.y * scale, ann.data.width * scale, ann.data.height * scale);
+                        ctx.drawImage(img, data.x * scale, data.y * scale, data.width * scale, data.height * scale);
                     }
                 }
                 break;
+            }
         }
     }, [canvasRef, annotations, currentPageId, scale]);
 
@@ -459,14 +504,18 @@ export const useEditorTools = (
                 case 'eraser':
                 case 'highlight':
                     currentPath.current.push({ x, y });
-                    tempAnnotation.current.data.points = [...currentPath.current];
+                    if (tempAnnotation.current.type === 'draw' || tempAnnotation.current.type === 'eraser' || tempAnnotation.current.type === 'highlight') {
+                        (tempAnnotation.current.data as DrawAnnotationData | EraserAnnotationData | HighlightAnnotationData).points = [...currentPath.current];
+                    }
                     break;
 
                 case 'shape':
                     // 更新結束位置
-                    tempAnnotation.current.data.width = x - startPos.current.x;
-                    tempAnnotation.current.data.height = y - startPos.current.y;
-                    break;
+                    if (tempAnnotation.current.type === 'shape') {
+                        const data = tempAnnotation.current.data as ShapeAnnotationData;
+                        data.width = x - startPos.current.x;
+                        data.height = y - startPos.current.y;
+                    }
                     break;
             }
 
@@ -507,15 +556,18 @@ export const useEditorTools = (
                     addAnnotation(tempAnnotation.current);
                 }
             } else if (activeTool === 'shape') {
-                const { x: startX, y: startY } = startPos.current;
-                const width = tempAnnotation.current.data.width;
-                const height = tempAnnotation.current.data.height;
-                const distance = Math.sqrt(width * width + height * height);
-                if (distance > 5) {
-                    // 設定起始位置
-                    tempAnnotation.current.data.x = startX;
-                    tempAnnotation.current.data.y = startY;
-                    addAnnotation(tempAnnotation.current);
+                if (tempAnnotation.current.type === 'shape') {
+                    const { x: startX, y: startY } = startPos.current;
+                    const data = tempAnnotation.current.data as ShapeAnnotationData;
+                    const width = data.width;
+                    const height = data.height;
+                    const distance = Math.sqrt(width * width + height * height);
+                    if (distance > 5) {
+                        // 設定起始位置
+                        data.x = startX;
+                        data.y = startY;
+                        addAnnotation(tempAnnotation.current);
+                    }
                 }
             } else if (activeTool === 'text') {
                 // 文字工具直接添加
