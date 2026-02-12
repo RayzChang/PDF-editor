@@ -55,8 +55,18 @@ function isRecognizedFontFormat(bytes: Uint8Array): boolean {
 async function getCjkFontBytes(): Promise<Uint8Array | null> {
     if (cjkFontBytesCache) return cjkFontBytesCache;
     try {
-        const res = await fetch('/fonts/NotoSansTC-VariableFont_wght.ttf', { cache: 'force-cache' });
-        if (!res.ok) return null;
+        // 使用相對路徑以支援 Electron 的 file:// 協定
+        const res = await fetch('./fonts/NotoSansTC-VariableFont_wght.ttf', { cache: 'force-cache' });
+        if (!res.ok) {
+            // 嘗試另一種相對路徑備案
+            const res2 = await fetch('fonts/NotoSansTC-VariableFont_wght.ttf', { cache: 'force-cache' });
+            if (!res2.ok) return null;
+            const ab2 = await res2.arrayBuffer();
+            const bytes2 = new Uint8Array(ab2);
+            if (!isRecognizedFontFormat(bytes2)) return null;
+            cjkFontBytesCache = bytes2;
+            return cjkFontBytesCache;
+        }
         const ab = await res.arrayBuffer();
         const bytes = new Uint8Array(ab);
         if (!isRecognizedFontFormat(bytes)) return null; // 可能是 404 的 HTML 或錯誤格式
@@ -103,6 +113,20 @@ export async function modifyPageText(
     const timesRomanFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
     const courierFont = await pdfDoc.embedFont(StandardFonts.Courier);
 
+    let cjkFont: PDFFont | null = null;
+    const needsCjk = modifications.some(m => needsUnicodeFont(m.text));
+    if (needsCjk) {
+        const bytes = await getCjkFontBytes();
+        if (bytes) {
+            try {
+                pdfDoc.registerFontkit(fontkit);
+                cjkFont = await pdfDoc.embedFont(bytes);
+            } catch (e) {
+                console.error('Failed to embed CJK font in modifyPageText:', e);
+            }
+        }
+    }
+
     const { width: pageWidth, height: pageHeight } = page.getSize();
 
     for (const mod of modifications) {
@@ -127,8 +151,17 @@ export async function modifyPageText(
         // 2. Select Font
         let font = helveticaFont;
         const lowerFont = (mod.fontFamily || '').toLowerCase();
-        if (lowerFont.includes('times')) font = timesRomanFont;
-        else if (lowerFont.includes('courier') || lowerFont.includes('mono')) font = courierFont;
+        const isCjk = needsUnicodeFont(mod.text);
+
+        if (isCjk && cjkFont) {
+            font = cjkFont;
+        } else if (lowerFont.includes('times')) {
+            font = timesRomanFont;
+        } else if (lowerFont.includes('courier') || lowerFont.includes('mono')) {
+            font = courierFont;
+        }
+
+        const safeText = (isCjk && cjkFont) ? mod.text : toWinAnsiSafe(mod.text);
 
         // 3. Parse Color
         let color = rgb(0, 0, 0);
@@ -159,7 +192,7 @@ export async function modifyPageText(
         // We can double check if we want to use font metrics to define the mask height more robustly.
         // But mod.height (from original bounding box) is usually safe for "covering original".
 
-        page.drawText(mod.text, {
+        page.drawText(safeText, {
             x: pdfX,
             y: pdfBaselineY + descent,
             size: mod.fontSize,
