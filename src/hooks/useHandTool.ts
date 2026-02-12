@@ -43,12 +43,14 @@ export const useHandTool = (
             container.scrollLeft = scrollStart.x - dx;
             container.scrollTop = scrollStart.y - dy;
 
-            console.log('[PAN]',
-                'dx=', dx,
-                'scrollLeft=', container.scrollLeft,
-                'scrollWidth=', container.scrollWidth,
-                'clientWidth=', container.clientWidth
-            );
+            if (import.meta.env.DEV) {
+                console.log('[PAN]',
+                    'dx=', dx,
+                    'scrollLeft=', container.scrollLeft,
+                    'scrollWidth=', container.scrollWidth,
+                    'clientWidth=', container.clientWidth
+                );
+            }
         },
         [isPanning, panStart, scrollStart, containerRef, activeTool]
     );

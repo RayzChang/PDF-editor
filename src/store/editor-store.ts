@@ -248,11 +248,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     },
 
     updateAnnotation: (id, data) => {
-        const { annotations } = get();
+        const { annotations, history, historyIndex } = get();
+        const newAnnotations = annotations.map(a =>
+            a.id === id ? { ...a, data: { ...a.data, ...data } } : a
+        );
+        const newHistory = history.slice(0, historyIndex + 1);
+        newHistory.push(newAnnotations);
+
         set({
-            annotations: annotations.map(a =>
-                a.id === id ? { ...a, data: { ...a.data, ...data } } : a
-            ),
+            annotations: newAnnotations,
+            history: newHistory,
+            historyIndex: historyIndex + 1,
         });
     },
 

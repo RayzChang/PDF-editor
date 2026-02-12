@@ -642,35 +642,6 @@ export const PDFViewer: React.FC = () => {
             </div>
 
 
-            {/* Debug Overlay (Fixed at top-right, high z-index) - Only in DEV */}
-            {import.meta.env.DEV && (
-                <div style={{
-                    position: 'fixed',
-                    top: '80px',
-                    right: '20px',
-                    zIndex: 999999,
-                    background: 'rgba(0,0,0,0.85)',
-                    color: '#00ff00',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    fontSize: '11px',
-                    fontFamily: 'monospace',
-                    pointerEvents: 'none',
-                    boxShadow: '0 4px 15px rgba(0,0,0,0.5)',
-                    border: '1px solid #444',
-                    minWidth: '200px'
-                }}>
-                    <div style={{ fontWeight: 'bold', marginBottom: '8px', borderBottom: '1px solid #444', paddingBottom: '4px' }}>ENGINE MONITOR</div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Mouse Raw:</span> <span style={{ color: 'white' }}>{cursorPosition.x.toFixed(0)}, {cursorPosition.y.toFixed(0)}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Mouse PDF:</span> <span style={{ color: '#00ff00' }}>{(cursorPosition.x / scale).toFixed(0)}, {(cursorPosition.y / scale).toFixed(0)}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Rotation:</span> <span style={{ color: 'white' }}>{pageRotation}°</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Scale:</span> <span style={{ color: 'white' }}>{scale.toFixed(2)}x</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tool:</span> <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>{activeTool.toUpperCase()}</span></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', paddingTop: '4px', borderTop: '1px dotted #444' }}>
-                        <span>NativeItems:</span> <span style={{ color: 'white' }}>{useEditorStore.getState().nativeTextItems.length}</span>
-                    </div>
-                </div>
-            )}
 
             <input
                 ref={imageInputRef}

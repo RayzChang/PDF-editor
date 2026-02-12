@@ -54,27 +54,31 @@ function isRecognizedFontFormat(bytes: Uint8Array): boolean {
 
 async function getCjkFontBytes(): Promise<Uint8Array | null> {
     if (cjkFontBytesCache) return cjkFontBytesCache;
-    try {
-        // 使用相對路徑以支援 Electron 的 file:// 協定
-        const res = await fetch('./fonts/NotoSansTC-VariableFont_wght.ttf', { cache: 'force-cache' });
-        if (!res.ok) {
-            // 嘗試另一種相對路徑備案
-            const res2 = await fetch('fonts/NotoSansTC-VariableFont_wght.ttf', { cache: 'force-cache' });
-            if (!res2.ok) return null;
-            const ab2 = await res2.arrayBuffer();
-            const bytes2 = new Uint8Array(ab2);
-            if (!isRecognizedFontFormat(bytes2)) return null;
-            cjkFontBytesCache = bytes2;
+    
+    // 嘗試多種路徑以支援不同環境（Vite dev/prod、Electron file://）
+    const fontPaths = [
+        '/fonts/NotoSansTC-VariableFont_wght.ttf',  // 標準 Vite public 路徑（開發/生產環境）
+        './fonts/NotoSansTC-VariableFont_wght.ttf', // 相對路徑（Electron file://）
+        'fonts/NotoSansTC-VariableFont_wght.ttf',   // 無前綴相對路徑
+    ];
+    
+    for (const fontPath of fontPaths) {
+        try {
+            const res = await fetch(fontPath, { cache: 'force-cache' });
+            if (!res.ok) continue;
+            
+            const ab = await res.arrayBuffer();
+            const bytes = new Uint8Array(ab);
+            if (!isRecognizedFontFormat(bytes)) continue; // 可能是 404 的 HTML 或錯誤格式
+            
+            cjkFontBytesCache = bytes;
             return cjkFontBytesCache;
+        } catch {
+            continue; // 嘗試下一個路徑
         }
-        const ab = await res.arrayBuffer();
-        const bytes = new Uint8Array(ab);
-        if (!isRecognizedFontFormat(bytes)) return null; // 可能是 404 的 HTML 或錯誤格式
-        cjkFontBytesCache = bytes;
-        return cjkFontBytesCache;
-    } catch {
-        return null;
     }
+    
+    return null; // 所有路徑都失敗
 }
 
 export interface TextModification {
@@ -224,23 +228,66 @@ export class PDFEditor {
         // 匯出前清除每頁註解（表單框線等），避免檢視器後畫註解層、蓋住我們寫的字
         for (const page of pages) clearPageAnnotations(page);
 
-        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        // 載入所有標準字型變體以支援粗體/斜體
+        const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const helveticaBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        const helveticaObliqueFont = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
+        const helveticaBoldObliqueFont = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
+        
+        // 根據 fontWeight 和 fontStyle 選擇字型的輔助函數
+        const getStandardFont = (fontWeight?: string, fontStyle?: string): PDFFont => {
+            const isBold = fontWeight === 'bold' || fontWeight === '700';
+            const isItalic = fontStyle === 'italic' || fontStyle === 'oblique';
+            
+            if (isBold && isItalic) return helveticaBoldObliqueFont;
+            if (isBold) return helveticaBoldFont;
+            if (isItalic) return helveticaObliqueFont;
+            return helveticaFont;
+        };
+        
+        // CJK 字型：載入一般和粗體版本
         let cjkFont: PDFFont | null = null;
+        let cjkFontBold: PDFFont | null = null;
         const needsCjk = annotations.some(
             (a) => a.type === 'text' && a.data?.text && needsUnicodeFont(a.data.text)
         );
+        const needsCjkBold = annotations.some(
+            (a) => a.type === 'text' && a.data?.text && needsUnicodeFont(a.data.text) && 
+                   (a.data?.fontWeight === 'bold' || a.data?.fontWeight === '700')
+        );
+        
         if (needsCjk) {
             const bytes = await getCjkFontBytes();
             if (bytes) {
                 try {
                     pdfDoc.registerFontkit(fontkit);
+                    // 載入一般 weight 的字型
                     cjkFont = await pdfDoc.embedFont(bytes);
+                    
+                    // 對於變數字型，嘗試建立粗體版本
+                    // 注意：pdf-lib 的 embedFont 不直接支援變數字型參數
+                    // 變數字型的 weight 需要透過 fontkit 的 layout 功能設定，但這需要更複雜的實作
+                    // 目前 CJK 粗體暫時無法支援，先使用一般字型
+                    // TODO: 實作變數字型的 weight 支援（可能需要使用 fontkit layout 設定 wght: 700 或載入不同 weight 的字型檔案）
+                    if (needsCjkBold) {
+                        cjkFontBold = cjkFont; // 暫時使用一般字型
+                    }
                 } catch {
                     // Unknown font format 或其它錯誤時不嵌入，改用 WinAnsi 安全字串
                     cjkFont = null;
+                    cjkFontBold = null;
                 }
             }
         }
+        
+        // 根據 fontWeight 選擇 CJK 字型的輔助函數
+        const getCjkFont = (fontWeight?: string): PDFFont | null => {
+            if (!cjkFont) return null;
+            const isBold = fontWeight === 'bold' || fontWeight === '700';
+            // 目前變數字型的 weight 支援尚未完全實作，CJK 粗體暫時無法支援
+            // 標準字型（英文）的粗體已支援，但 CJK 字型需要額外處理
+            return isBold && cjkFontBold ? cjkFontBold : cjkFont;
+        };
 
         // 繪製順序：先底層再上層，與介面一致；筆跡/橡皮擦最後畫（壓在文字與螢光筆上面）
         const layerOrder: Record<string, number> = {
@@ -353,7 +400,10 @@ export class PDFEditor {
                 const lineHeight = fontSize * 1.2;
                 const useCjk = cjkFont && needsUnicodeFont(textToDraw);
                 const safeText = useCjk ? textToDraw : toWinAnsiSafe(textToDraw);
-                const textFont = useCjk ? cjkFont! : font;
+                // 選擇字型：標準字型支援粗體/斜體變體；CJK 字型目前不支援（變數字型的 weight 需要額外處理）
+                const textFont = useCjk 
+                    ? getCjkFont(data.fontWeight) || cjkFont!
+                    : getStandardFont(data.fontWeight, data.fontStyle);
                 const color = parseColor(data.color);
                 const lines = safeText.split(/\r?\n/);
                 // 頁面有旋轉時，文字需同向旋轉才會在檢視時維持正常閱讀（與頁面一起轉，才不會顛倒）

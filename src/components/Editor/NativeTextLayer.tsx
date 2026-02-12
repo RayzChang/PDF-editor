@@ -27,9 +27,11 @@ export const NativeTextLayer: React.FC<NativeTextLayerProps> = ({ scale, rotatio
     const [editingId, setEditingId] = useState<string | null>(null);
     const editorRef = useRef<HTMLDivElement>(null);
 
-    // Insurance log for mounting/updates
+    // Insurance log for mounting/updates (DEV only)
     useEffect(() => {
-        console.log('NativeTextLayer mounted/updated', nativeTextItems.length);
+        if (import.meta.env.DEV) {
+            console.log('NativeTextLayer mounted/updated', nativeTextItems.length);
+        }
     }, [nativeTextItems]);
 
     // Group text items into lines/paragraphs

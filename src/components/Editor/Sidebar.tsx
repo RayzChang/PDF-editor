@@ -23,7 +23,9 @@ export const Sidebar: React.FC = () => {
                 return;
             }
 
-            console.log('Generating thumbnails for pages:', pages.length);
+            if (import.meta.env.DEV) {
+                console.log('Generating thumbnails for pages:', pages.length);
+            }
 
             for (const page of pages) {
                 if (isCancelled) break;

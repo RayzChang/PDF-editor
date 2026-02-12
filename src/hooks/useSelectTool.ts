@@ -152,13 +152,6 @@ export const useSelectTool = (
             // 2. 檢査是否點擊了標註主體
             const annotation = findAnnotationAtPoint(x, y);
             if (annotation) {
-                if (e.detail === 2) {
-                    if (annotation.type === 'text') {
-                        onTextClick(annotation.id);
-                    }
-                    return;
-                }
-
                 selectAnnotation(annotation.id);
                 setActiveHandle(null);
                 setIsDragging(true);
@@ -277,6 +270,22 @@ export const useSelectTool = (
         }
     }, [isDragging, selectedAnnotation, annotations]);
 
+    // 處理雙擊事件（開啟文字編輯器）
+    const handleDoubleClick = useCallback(
+        (e: MouseEvent) => {
+            if (activeTool !== 'select') return;
+
+            const { x, y } = getCanvasCoordinates(e);
+            const annotation = findAnnotationAtPoint(x, y);
+            if (annotation && annotation.type === 'text') {
+                onTextClick(annotation.id);
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        },
+        [activeTool, getCanvasCoordinates, findAnnotationAtPoint, onTextClick]
+    );
+
     // 註冊事件
     useEffect(() => {
         const layer = interactionLayerRef.current;
@@ -288,15 +297,17 @@ export const useSelectTool = (
         };
 
         layer.addEventListener('pointerdown', onPointerDown as any);
+        layer.addEventListener('dblclick', handleDoubleClick as any);
         window.addEventListener('pointermove', handleMouseMove as any);
         window.addEventListener('pointerup', handleMouseUp as any);
 
         return () => {
             layer.removeEventListener('pointerdown', onPointerDown as any);
+            layer.removeEventListener('dblclick', handleDoubleClick as any);
             window.removeEventListener('pointermove', handleMouseMove as any);
             window.removeEventListener('pointerup', handleMouseUp as any);
         };
-    }, [interactionLayerRef, handleMouseDown, handleMouseMove, handleMouseUp]);
+    }, [interactionLayerRef, handleMouseDown, handleMouseMove, handleMouseUp, handleDoubleClick]);
 
     return { selectedAnnotation };
 };

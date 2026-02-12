@@ -291,24 +291,32 @@ export const useEditorTools = (
             const { x, y } = getCanvasCoordinates(e);
 
             if (activeTool === 'image') {
-                console.log('Detected Image Tool Click at:', { x, y });
+                if (import.meta.env.DEV) {
+                    console.log('Detected Image Tool Click at:', { x, y });
+                }
                 const input = imageInputRef?.current;
                 if (input && clickPos) {
                     clickPos.current = { x, y };
 
                     // 【關鍵修正】: 即時綁定處理器，避開 useEffect 初始化失敗問題
                     input.onchange = (ev: any) => {
-                        console.log('Image input: Change event detected!');
+                        if (import.meta.env.DEV) {
+                            console.log('Image input: Change event detected!');
+                        }
                         const file = ev.target?.files?.[0];
                         if (!file) return;
 
-                        console.log('Image input: Reading file...', file.name);
+                        if (import.meta.env.DEV) {
+                            console.log('Image input: Reading file...', file.name);
+                        }
                         const reader = new FileReader();
                         reader.onload = (readerEv) => {
                             const imageData = readerEv.target?.result as string;
                             const img = new Image();
                             img.onload = () => {
-                                console.log('Image input: Adding annotation at', { x, y });
+                                if (import.meta.env.DEV) {
+                                    console.log('Image input: Adding annotation at', { x, y });
+                                }
                                 const annotation: Annotation = {
                                     id: `image-${Date.now()}`,
                                     type: 'image',
@@ -323,7 +331,9 @@ export const useEditorTools = (
                                     timestamp: Date.now(),
                                 };
                                 addAnnotation(annotation);
-                                console.log('Image input: Success');
+                                if (import.meta.env.DEV) {
+                                    console.log('Image input: Success');
+                                }
                                 // 清除 handler 並重置 input
                                 input.onchange = null;
                                 input.value = '';
